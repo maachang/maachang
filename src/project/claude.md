@@ -110,6 +110,12 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`encrypt.randomToken(len)` / `encrypt.sha256(str)` / `encrypt.hmac(str, key)`**: ランダムトークン・ハッシュ生成。
 - **`http.get(url, opt)` / `http.postJson(url, data, opt)` / `http.getJson(url, opt)`**: タイムアウト・リトライ付き HTTP クライアント。
 
+### 9. `fileUtil.js` / `file.js`（ファイル・JSON入出力支援）
+- **`fileUtil.readJson(path, def)` / `fileUtil.writeJson(path, data)`**: JSON の安全な読み書き（親ディレクトリ自動生成）。
+- **`fileUtil.readText(path)` / `fileUtil.writeText(path, text)`**: テキストファイルの読み書き。
+- **`fileUtil.list(dir, { ext, recursive })`**: 拡張子フィルタ・再帰探索付きファイル一覧。
+- **`fileUtil.safeFileName(origName, allowedExts, prefix)`**: アップロードファイル名の安全な生成（拡張子検証・ユニーク名化）。
+
 ---
 
 # ローカル実行・デプロイ手順

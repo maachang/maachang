@@ -26,6 +26,7 @@ maachang が標準提供しているモジュール群のリファレンスで�
 | | [`notification/sendSlack.js`](#15-notificationsendslackjs-slack-通知) | Incoming Webhook / Bot Token による Slack 通知送信 |
 | | [`notification/sendGithub.js`](#16-notificationsendgithubjs-github-issue-作成) | GitHub Issue の自動起票 |
 | | [`http/multipart.js`](#17-httpmultipartjs-ファイルアップロード解析) | `multipart/form-data` によるファイルアップロードの解析 |
+| **ファイル・JSON** | [`fileUtil.js`](#18-fileutiljs-ファイルjson-入出力支援) | 安全な JSON 読み書き、ファイル一覧、安全なファイル名生成 |
 
 ---
 
@@ -410,4 +411,28 @@ exports.handler = async function() {
     
     return { success: true, fileCount: parsed.files.length };
 };
+```
+
+---
+
+### 18. `fileUtil.js` (ファイル・JSON 入出力支援)
+JSON の安全な読み書き（親ディレクトリ自動生成）、拡張子フィルタ付き一覧、アップロードファイル名の安全な生成を行います。
+
+```javascript
+const fileUtil = $loadLib('fileUtil.js');
+
+// 1. JSON の安全な読み書き (親ディレクトリ自動作成、エラー時は default 返却)
+const config = fileUtil.readJson('./conf/app.json', { defaultVal: 1 });
+fileUtil.writeJson('./data/backup.json', { savedAt: new Date(), count: 10 });
+
+// 2. テキスト・バイナリの読み書き
+fileUtil.writeText('./data/hello.txt', 'Hello maachang');
+const text = fileUtil.readText('./data/hello.txt');
+
+// 3. ディレクトリ一覧取得 (再帰探索・拡張子フィルタ)
+const files = fileUtil.list('./public', { ext: ['html', 'jhtml'], recursive: true });
+
+// 4. アップロードファイル名の安全な生成 (パストラバーサル除去・拡張子検証・ユニーク名化)
+const safeName = fileUtil.safeFileName('../avatar.PNG', ['png', 'jpg', 'webp'], 'user_');
+// 例: "user_1786866832000_a1b2c3d4e5f6.png"
 ```

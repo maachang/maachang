@@ -63,6 +63,7 @@ maachang/ (フレームワーク本体)
 │   ├── format.js                # 日本語・データ整形 (金額, カナ, バイト等)
 │   ├── encrypt.js               # AES-256-GCM 可逆暗号化・復号
 │   ├── http.js                  # タイムアウト・リトライ付き HTTP クライアント
+│   ├── fileUtil.js / file.js    # ファイル・JSON入出力支援
 │   ├── auth/                    # password, jwt, csrf, rbac, corsFilter
 │   ├── csv/                     # csvReader, csvWriter
 │   ├── validate/                # validate (スキーマバリデーション)
@@ -281,6 +282,12 @@ const plain = encrypt.decrypt(cipher, 'myKey'); // "SecretData"
 // 3. タイムアウト・リトライ付き HTTP クライアント
 const http = $loadLib('http.js');
 const data = await http.getJson('https://api.example.com/items', { timeout: 3000, retry: 2 });
+
+// 4. ファイル・JSON 入出力支援
+const fileUtil = $loadLib('fileUtil.js');
+fileUtil.writeJson('./data/backup.json', { key: 'value' }); // ディレクトリ自動作成
+const config = fileUtil.readJson('./conf/app.json', { defaultVal: 1 });
+const safeName = fileUtil.safeFileName('avatar.PNG', ['png', 'jpg'], 'user_');
 ```
 
 ### 9. 組み込みオブジェクト
