@@ -18,6 +18,19 @@ describe('Additional Utilities Suite (format, encrypt, http)', () => {
             expect(format.money(null)).toBe('');
         });
 
+        it('金額文字列の逆変換 (parseMoney / unmoney) が正しく動作すること', () => {
+            expect(format.parseMoney('1,234,567')).toBe(1234567);
+            expect(format.parseMoney('¥1,234,567.89')).toBe(1234567.89);
+            expect(format.parseMoney(' ￥ 1,000 円 ')).toBe(1000);
+            expect(format.parseMoney('１,２３４,５６７')).toBe(1234567); // 全角
+            expect(format.parseMoney('-1,234')).toBe(-1234);
+            expect(format.parseMoney('▲1,234.5')).toBe(-1234.5);
+            expect(format.parseMoney('(500)')).toBe(-500);
+            expect(format.parseMoney('', 0)).toBe(0);
+            expect(format.parseMoney('invalid', -1)).toBe(-1);
+            expect(format.unmoney('$9,999')).toBe(9999);
+        });
+
         it('全角・半角変換 (toHalfWidth, toFullWidth) が正しく動作すること', () => {
             expect(format.toHalfWidth('ＡＢＣ　１２３！')).toBe('ABC 123!');
             expect(format.toFullWidth('ABC 123!')).toBe('ＡＢＣ　１２３！');

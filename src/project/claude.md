@@ -105,7 +105,7 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`multipart.parse(req)`**: `multipart/form-data` によるファイルアップロードの解析。
 
 ### 8. `format.js` / `encrypt.js` / `http.js`（整形・暗号化・HTTPクライアント）
-- **`format.money(val)` / `format.toHalfWidth(str)` / `format.bytes(n)` / `format.mask(str)` / `format.truncate(str, len)`**: 日本語業務画面向けフォーマット。
+- **`format.money(val)` / `format.parseMoney(str)` / `format.toHalfWidth(str)` / `format.bytes(n)` / `format.mask(str)` / `format.truncate(str, len)`**: 日本語業務画面向けフォーマット（金額相互変換・全角半角等）。
 - **`encrypt.encrypt(plain, key)` / `encrypt.decrypt(cipher, key)`**: AES-256-GCM 可逆暗号化・復号（改ざん検知 AuthTag 付き）。
 - **`encrypt.randomToken(len)` / `encrypt.sha256(str)` / `encrypt.hmac(str, key)`**: ランダムトークン・ハッシュ生成。
 - **`http.get(url, opt)` / `http.postJson(url, data, opt)` / `http.getJson(url, opt)`**: タイムアウト・リトライ付き HTTP クライアント。

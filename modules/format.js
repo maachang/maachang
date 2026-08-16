@@ -31,6 +31,39 @@ function money(value, prefix = '') {
 }
 
 /**
+ * 金額・カンマ区切り文字列を数値 (number) に逆変換
+ * (例: "1,234,567" -> 1234567, "¥1,234,567.89" -> 1234567.89, "▲1,000" -> -1000)
+ * @param {string|number} value 
+ * @param {number} [defaultValue=0] 変換不能時のデフォルト値
+ * @returns {number}
+ */
+function parseMoney(value, defaultValue = 0) {
+    if (value === null || value === undefined || value === '') return defaultValue;
+    if (typeof value === 'number') return isNaN(value) ? defaultValue : value;
+
+    // 全角を半角に変換
+    let s = toHalfWidth(String(value)).trim();
+
+    // マイナス表記の正規化 (▲, △, (1000) -> -1000)
+    let isNegative = false;
+    if (s.startsWith('-') || s.startsWith('▲') || s.startsWith('△')) {
+        isNegative = true;
+        s = s.slice(1);
+    } else if (s.startsWith('(') && s.endsWith(')')) {
+        isNegative = true;
+        s = s.slice(1, -1);
+    }
+
+    // 通貨記号（¥, ￥, $, €, 円）、カンマ、空白を除去
+    s = s.replace(/[¥￥$€円,\s]/g, '');
+
+    const num = Number(s);
+    if (isNaN(num)) return defaultValue;
+
+    return isNegative ? -num : num;
+}
+
+/**
  * 全角英数・スペース・記号を半角に変換
  * @param {string} str 
  * @returns {string}
@@ -153,6 +186,9 @@ function escapeHtml(str) {
 module.exports = {
     money,
     comma: money,
+    parseMoney,
+    unmoney: parseMoney,
+    parseComma: parseMoney,
     toHalfWidth,
     toFullWidth,
     toHiragana,

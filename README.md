@@ -268,6 +268,7 @@ const payload = jwt.verify(token, 'secretKey');
 // 1. フォーマット整形
 const format = $loadLib('format.js');
 format.money(1250000); // "1,250,000"
+format.parseMoney('¥1,250,000'); // 1250000 (逆変換)
 format.toHalfWidth('ＡＢＣ　１２３'); // "ABC 123"
 format.bytes(1048576); // "1.0 MB"
 format.mask('09012345678', 3, 4); // "090****5678"

@@ -133,9 +133,17 @@ monthRange.isBetween('2026-09-01'); // false
 ```javascript
 const format = $loadLib('format.js');
 
-// 金額・数値カンマ区切り
+// 金額・数値カンマ区切り (数値 -> 文字列)
 format.money(1250000);        // "1,250,000"
 format.money(1250000.5, '¥'); // "¥1,250,000.5"
+
+// 金額・カンマ区切りの逆変換 (文字列 -> 数値)
+format.parseMoney('1,234,567');     // 1234567
+format.parseMoney('¥1,234,567.89'); // 1234567.89
+format.parseMoney(' ￥ 1,000 円 '); // 1000
+format.parseMoney('１,２３４,５６７'); // 1234567 (全角数字・全角カンマもOK)
+format.parseMoney('▲1,234.5');      // -1234.5 (▲, △, (1234) などのマイナス表記に対応)
+format.unmoney('$9,999');           // 9999 (unmoney / parseComma エイリアスあり)
 
 // 全角半角変換 (フォーム入力のゆらぎ吸収)
 format.toHalfWidth('ＡＢＣ　１２３！'); // "ABC 123!"
