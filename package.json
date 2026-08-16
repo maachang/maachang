@@ -1,0 +1,25 @@
+{
+  "name": "maachang",
+  "version": "1.0.0",
+  "description": "[maachang]Minimal on-premise Bun.serve web application framework following minto design",
+  "main": "src/index.js",
+  "bin": {
+    "maachang": "./bin/maachang",
+    "mkmc": "./bin/mkmc",
+    "mcbuild": "./bin/mcbuild"
+  },
+  "scripts": {
+    "start": "bun run src/index.js",
+    "test": "bun test"
+  },
+  "keywords": [
+    "bun",
+    "minto",
+    "framework",
+    "sqlite",
+    "on-premise",
+    "jhtml"
+  ],
+  "author": "",
+  "license": "MIT"
+}

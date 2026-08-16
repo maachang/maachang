@@ -1,0 +1,78 @@
+#!/bin/sh
+# maachang 初期セットアップスクリプト
+#
+# git リポジトリから取得した maachang を利用可能にするため、
+# MAACHANG_HOME 環境変数の設定と PATH への bin 追加を、
+# シェル設定ファイルへ自動的に追記します。
+#
+# 対応シェル: bash (.bashrc / macOSのみ .bash_profile), zsh (.zshrc)
+# 対応環境: Linux, macOS, WSL2
+#
+# 使い方:
+#   cd maachang
+#   ./bin/initMaachang
+#   (追記後は `source <表示された設定ファイル>` するか、ターミナルを再起動)
+
+set -e
+
+# このスクリプト自身の絶対パスから、maachang のルートディレクトリ (MAACHANG_HOME) を算出
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MAACHANG_HOME="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# 追記対象のシェル設定ファイルを決定
+detect_profile() {
+    shell_name="$(basename "${SHELL:-bash}")"
+    case "${shell_name}" in
+        zsh)
+            echo "${HOME}/.zshrc"
+            ;;
+        bash)
+            if [ "$(uname)" = "Darwin" ]; then
+                echo "${HOME}/.bash_profile"
+            else
+                echo "${HOME}/.bashrc"
+            fi
+            ;;
+        *)
+            if [ -f "${HOME}/.bashrc" ]; then
+                echo "${HOME}/.bashrc"
+            elif [ -f "${HOME}/.profile" ]; then
+                echo "${HOME}/.profile"
+            else
+                echo "${HOME}/.bashrc"
+            fi
+            ;;
+    esac
+}
+
+PROFILE="$(detect_profile)"
+MARKER="# maachang-cli-config"
+
+echo "=================================================="
+echo " 🚀 maachang 環境セットアップ"
+echo "=================================================="
+echo " - MAACHANG_HOME : ${MAACHANG_HOME}"
+echo " - 対象設定ファイル : ${PROFILE}"
+echo "--------------------------------------------------"
+
+if [ -f "${PROFILE}" ] && grep -Fq "${MARKER}" "${PROFILE}"; then
+    echo "ℹ️ すでに ${PROFILE} に maachang の設定が記述されています。"
+    echo "  (再設定が必要な場合は該当行を削除してから再実行してください)"
+else
+    mkdir -p "$(dirname "${PROFILE}")"
+    touch "${PROFILE}"
+
+    cat << EOF >> "${PROFILE}"
+
+${MARKER}
+export MAACHANG_HOME="${MAACHANG_HOME}"
+export PATH="\${MAACHANG_HOME}/bin:\${PATH}"
+EOF
+
+    echo "✅ ${PROFILE} に MAACHANG_HOME と PATH を追記しました！"
+fi
+
+echo "--------------------------------------------------"
+echo "次のコマンドを実行して設定を反映してください:"
+echo "  source ${PROFILE}"
+echo "=================================================="
