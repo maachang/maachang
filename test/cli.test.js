@@ -38,6 +38,11 @@ describe('CLI & Multi-project Execution', () => {
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'index.html'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'api', 'hello.mt.js'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'sample.mt.html'))).toBe(true);
+        expect(fs.existsSync(path.join(tmpProjectDir, '.claude', 'CLAUDE.md'))).toBe(true);
+
+        const claudeMdContent = fs.readFileSync(path.join(tmpProjectDir, '.claude', 'CLAUDE.md'), 'utf-8');
+        expect(claudeMdContent).toContain(path.basename(tmpProjectDir));
+        expect(claudeMdContent).not.toContain('${PROJECT_NAME}');
     });
 
     it('mcbuild でプロジェクト内の JHTML テンプレートがコンパイルされること', async () => {

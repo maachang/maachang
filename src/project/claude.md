@@ -1,12 +1,21 @@
 # ${PROJECT_NAME} プロジェクト固有の情報
 
-このファイルは Claude Code や agy (Google Antigravity) がセッション開始時に自動的に読み込みます。ここにはプロジェクト固有の事実および minto フレームワークの利用ルールを記載します。
+このファイルは Claude Code や agy (Google Antigravity) がセッション開始時に自動的に読み込みます。ここにはプロジェクト固有の事実および maachang フレームワークの利用ルールを記載します。
 
 # プロジェクト概要
 
-このプロジェクトは [minto](https://github.com/maachang/minto)（LLRT を使った AWS Lambda 軽量高速化フレームワーク）を使って構築されたサーバーレス Web アプリケーション / API（AWS Lambda 関数 URL または API Gateway 連携）です。
+このプロジェクトは [maachang](https://github.com/maachang/maachang)（オンプレミス向けの Bun.serve 実行による超最小・高速 Web アプリケーションフレームワーク）を使って構築された Web アプリケーション / API です。
 
 （このプロジェクト「${PROJECT_NAME}」が何をするものか、ここに記載する）
+
+# インフラ・HTTPS 運用仕様
+
+- **Nginx リバースプロキシ構成**: オンプレミス本番環境では Nginx を前面に配置して運用します。
+- **無料 SSL 証明書 (Let's Encrypt / Certbot)**:
+  - HTTPS (443) 終端、および HTTP (80) での ACME チャレンジ (HTTP-01) はすべて Nginx 側で一元管理します。
+  - 証明書自動更新時は `nginx -s reload` による無停止反映を行います。
+  - maachang (Bun.serve) 側はローカルポート（HTTP: localhost:3000 等）でリクエストを受け付けます。
+  - クライアント IP 等の取得は Nginx から渡される `X-Forwarded-For` / `X-Real-IP` を利用します。
 
 # 作業領域（.claudeWork）
 
@@ -17,88 +26,66 @@
 # コーディング規約 & AI 開発ルール
 
 - **独断での仕様決定禁止**: 実装を任された際、詳細仕様（データフィルタリング手法、抽出ロジック、制限値、除外基準など）を独断で決定・補完することは禁止。必ずユーザーの承認を得ること。
-- **車輪の再発明の禁止**: minto が標準提供しているモジュール（`s3table`, `auth`, `notification`, `sdk`, `validate` 等）やグローバルヘルパー（`$log`, `$notifyError`, `$request()`, `$response()`）を優先活用し、独自ライブラリを安易に自作しない。
+- **車輪の再発明の禁止**: maachang が標準提供しているモジュール（`session.js`, `logger.js`）や組み込みヘルパー（`$request`, `$response`, `$db` 等）を優先活用し、独自ライブラリを安易に自作しない。
 - **既存コメントの維持**: 処理内容が変わって意味が通じなくなる場合を除き、既存コメントを削除しない。
 - **言語ルール**: コメントおよびユーザーへの返答・要約・説明文は常に**日本語**で記述する。
 - **バグ修正フロー**: バグやエラーの原因調査を依頼された場合、即座に修正せず、まず原因と修正方針を報告して承認を得てから修正に着手する。
-- **LLRT 互換性の維持**: Lambda 実行環境である LLRT の制約に従うこと（`for-await-of` 構文を避け `transformToString()` 等を使用、未サポート Node.js API を使わない）。
+- **CommonJS 形式**: モジュールやスクリプトは CommonJS 形式（`require` / `module.exports`）で統一する。
 
-# minto フレームワーク原則 & アーキテクチャ
+# maachang フレームワーク原則 & アーキテクチャ
 
-本プロジェクトは minto 環境（`${MINTO_HOME}`）上で動作します。
+本プロジェクトは maachang 環境（`${MAACHANG_HOME}`）上で動作します。
 
-- **`${MINTO_HOME}/lambda/src/index.js`**: Lambda 関数 URL のリクエストハンドラ本体（デプロイ時は `mtpk` により `index.cjs` に変換）。
-- **`${MINTO_HOME}/modules/`**: 共通モジュール群。`$loadLib("モジュール名.js")` でフラットにロード可能。
-  - **自動フォールバック**: ローカル実行時は `${MINTO_HOME}/modules/` 配下を自動検索するため、プロジェクトの `lib/` 配下にファイルを**コピーしてはならない**。
-  - **デプロイ時注意**: `mtpk` でデプロイ zip を作成する際、必要なモジュールカテゴリ（例: `-t s3table -t auth`）または `-t all` を明示的に指定する必要がある（`checkModules` コマンドで事前検査可能）。
-- **`${MINTO_HOME}/public/`**: minto が提供する既製画面・静的アセット（例: `public/auth/mfa/` の MFA 画面一式など）。
-  - プロジェクトの `public/` に同名ファイルがない場合、自動的に `${MINTO_HOME}/public/` 側へフォールバックされるため、コピーやラッパー作成は不要。
-- **`${MINTO_HOME}/bin/`**: minto コマンド群（PATH 登録済み）。
-- **`${MINTO_HOME}/docs/`**: フレームワークのドキュメント（`howto.md`, `s3MasterTable.md`, `s3-row-store-design.md`, `localAws.md`, `lambda.md` 等）。
+- **`${MAACHANG_HOME}/src/index.js`**: Bun.serve によるサーバー起動エントリ。
+- **`${MAACHANG_HOME}/src/router.js`**: ルーティング・静的配信・動的 JS/JHTML 実行・フィルター処理。
+- **`${MAACHANG_HOME}/modules/`**: 共通モジュール群（`session.js`, `logger.js` 等）。
+  - `$loadLib("モジュール名.js")` でフラットにロード可能。
+  - プロジェクト側の `lib/` に同名ファイルがある場合はプロジェクト側が優先される。
+- **`${MAACHANG_HOME}/bin/`**: maachang コマンド群（`initMaachang`, `mkmc`, `maachang`, `mcbuild`）。
 
 ---
 
 # グローバルオブジェクト & 組み込みヘルパー
 
-minto の `*.mt.js` / `*.mt.html` (JHTML) 内では以下のヘルパーが事前定義なしで利用できます。
+maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下のヘルパーが事前定義なしで利用できます（関数呼び出し `$request()` / `$response()` とオブジェクトアクセス `$request` / `$response` の両対応）。
 
 | ヘルパー | 説明 | 主なメソッド / プロパティ |
 |---|---|---|
-| `$request()` | リクエスト情報の取得 | `.query(key)`, `.param(key)`, `.params()`, `.path()`, `.method()`, `.headers()`, `.header(key)`, `.body()`, `.json()`, `.ip()`, `.cookie(key)` |
-| `$response()` | レスポンスの生成・返却 | `.json(data, status?)`, `.html(html, status?)`, `.redirect(url, status?)`, `.cookie(name, val, opt?)`, `.header(key, val)`, `.status(code)` |
-| `$log` | 構造化 JSON ログ出力 | `$log.info(...)`, `$log.warn(...)`, `$log.error(...)`, `$log.debug(...)`<br>※ `$requestId()`, `path`, `method` が自動付与される。 |
-| `$notifyError(err, context?, opt?)` | Slack への一元化エラー通知 | Webhook URL (`SLACK_WEBHOOK_URL`) または Slack Bot Token を自動判別してスタックトレース付きリッチ通知を送信 |
-| `$loadLib("name.js")` | モジュールのロード | `lib/` → `${MINTO_HOME}/modules/` の順で検索してロード |
-| `$loadConf("conf名")` | 設定 JSON の取得 | `conf/{conf名}.json` を取得（`.local.json` / `.test.json` があれば自動優先） |
-| `$view(path, data)` | JHTML の描画 | `public/` 配下の JHTML テンプレートをサーバーサイドレンダリング |
-| `$requestId()` | リクエスト ID | Snowflake / Lambda リクエスト一意 ID |
-| `$require(mod)` | Node 標準ライブラリ require | `crypto`, `path`, `fs` 等の安全な呼び出し |
+| `$request` / `$request()` | リクエスト情報の取得 | `.path`, `.method`, `.query`, `.body`, `.cookies`, `.ip`<br>`.getHeader(key)`, `.getQuery(key, def)`, `.getCookie(key, def)` |
+| `$response` / `$response()` | レスポンスの生成・返却 | `.status(code)`, `.contentType(type, charset)`, `.header(key, val)`, `.setCookie(name, val, opt)`, `.deleteCookie(name)`<br>`.json(data, status)`, `.html(str, status)`, `.text(str, status)`, `.redirect(url, status)`, `.body(val)` |
+| `$loadLib("name.js")` | モジュールのロード | `lib/` → `${MAACHANG_HOME}/modules/` の順で検索してロード |
+| `$loadConf("conf名")` | 設定 JSON の取得 | `conf/{conf名}.local.json`（ローカル優先）→ `conf/{conf名}.json` を取得 |
+| `$db` | SQLite3 データベース操作 | `bun:sqlite` ラッパー。<br>`$db.get(sql, params)`, `$db.all(sql, params)`, `$db.run(sql, params)`, `$db.exec(sql)`, `$db.transaction(fn)` |
+| `$require(mod)` | 標準ライブラリ require | `crypto`, `path`, `fs` 等の安全な呼び出し |
 
 ---
 
 # 主要モジュール クイックリファレンス (`$loadLib`)
 
-### 1. `s3table`（S3 データストア & ページネーション）
-- **`s3MasterTable.js`**: テーブル全体を 1 つの JSON として S3 に保存。**書き込み少・読み込み多**向け（全件キャッシュ・インメモリ高速検索）。
-- **`s3IndexTable.js`**: 1 行 = 1 ファイルで S3 保存。**書き込み頻度高**向け（物理インデックスによる $O(1)$ 検索、書き込み競合なし）。
-- **`paginate.js`**:
-  - `paginate.query(db, tableName, options)`: S3 `StartAfter` 直結の高速カーソル式（$O(1)$）およびオフセット式ページネーション。
-  - `paginate.url(url, cursorOrPage, paramName)`: SSR / リンク生成用ヘルパー。
-- **`s3presign.js`**: AWS SigV4 署名付き URL 生成（Direct to S3 アップロード / 一時ダウンロード）。
-- **`s3Lock.js`**: S3 `IfNoneMatch` による分散排他ロック。
-- **`seqId.js`**: Snowflake ID（固定長 16 桁 hex）採番。
+### 1. `session.js`（SQLite3 セッション管理）
+- **`sessionMod.createSession($response, initialData)`**: セッション新規作成 ＆ Cookie 自動発行。
+- **`sessionMod.getSession($request)`**: セッションデータ取得（有効期限切れ時は自動削除＆`null` 返却）。
+- **`sessionMod.setSession(sid, data)`**: セッションデータ更新。
+- **`sessionMod.deleteSession($request, $response)`**: セッション削除 ＆ Cookie 破棄。
+- **`sessionMod.cleanExpiredSessions()`**: 期限切れセッションの一括クリーンアップ。
 
-### 2. `auth`（認証・認可 & セキュリティ）
-- **`session.js`**: S3 ベースセッション管理（Cookie 自動連携、1 実行毎キャッシュ内蔵）。
-- **`rbac.js`**: ロールベース認可（`hasRole`, `hasPermission`, `routeGuard`、ロール階層継承）。
-- **`password.js`**: パスワードハッシュ化（SHA-256 + salt）。
-- **`jwt.js`**: JWT 署名・検証（HS256）。
-- **`cors.js`**: CORS プリフライト / レスポンスヘッダー組み立て。
-
-### 3. `notification`（ログ & 通知）
-- **`log.js`**: 構造化 JSON ログ出力。
-- **`notifyError.js`**: Slack エラー通知。
-- **`sendSlack.js`**: Slack メッセージ送信（Incoming Webhook & Bot Token `chat.postMessage`）。
-- **`sendGithub.js`**: GitHub Issue 自動起票。
-
-### 4. `validate` & `csv` & `sdk`
-- **`validate.js`**: オブジェクトのスキーマ検証（string, int, float, boolean, date, enum, pattern, custom）。
-- **`csv.js` / `memoryTable.js`**: CSV パース・エクスポート、インメモリソート・集計。
-- **`sdk/*.js`**: AWS SDK v3 ラッパー（`sqsSdk`, `dynamoDbSdk`, `sesSdk`, `kmsSdk`, `secretsManagerSdk`, `parameterStoreSdk`, `snsSdk`）。
+### 2. `logger.js` / `localLog.js`（日別ローテーションロガー）
+- **`logger.info(...)`, `logger.warn(...)`, `logger.error(...)`, `logger.debug(...)`, `logger.trace(...)`**:
+  - `[YYYY-MM-DD HH:mm:ss.SSS] [LEVEL] メッセージ` 形式で標準出力および `./log/{file}.YYYY-MM-DD.log` へ出力。
+- **`logger.setting({ dir, file, level, stdout })`**: ログ設定変更（`conf/log.json` による自動設定にも対応）。
 
 ---
 
 # ローカル実行・デプロイ手順
 
-`${MINTO_HOME}/bin` に PATH が通っているため、以下のコマンドがそのまま実行できます。
+`${MAACHANG_HOME}/bin` に PATH が通っているため、以下のコマンドがそのまま実行できます。
 
-- `npm install`: `@aws-sdk/client-s3` のローカルインストール。
-- `minto`: ローカル開発サーバー起動（デフォルト `http://127.0.0.1:3210/`）。
-  - **ホットリロード / ライブリロード内蔵**: `public/`, `lib/`, `conf/` の変更はサーバー再起動不要で即座に反映される。
-- `localAws [-p 9911] [-d .localS3]`: ローカル S3 + SQS エミュレータ。
-- `tableTool -t <master|index> -c <createTable|alterTable|alterIndex|dropTable|backupTable|restoreTable>`: S3 テーブル定義の管理・マイグレーション。
-- `checkModules`: デプロイ前の `$loadLib` 依存関係・`-t` オプション漏れチェック。
-- `mtpk [-t {カテゴリ名} ...] [-t all]`: AWS Lambda デプロイ用 zip (`mtpack.zip`) の作成。
+- `maachang`: カレントプロジェクトでローカル開発サーバー起動（デフォルト `http://localhost:3000/`）。
+  - `-p <port>`: ポート番号指定（例: `maachang -p 8080`）
+  - `-h <host>`: バインドホスト指定
+  - `--prod`: 本番モード起動
+- `mcbuild`: 本番デプロイ用にプロジェクト内の JHTML テンプレートを一括で `.jhtml.js` に事前コンパイル。
+- `bun test`: 単体・結合テストの実行。
 
 ---
 
@@ -106,10 +93,13 @@ minto の `*.mt.js` / `*.mt.html` (JHTML) 内では以下のヘルパーが事�
 
 | ディレクトリ・ファイル | 役割 |
 |---|---|
-| `public/` | Web コンテンツ・動的スクリプト (`*.mt.js` / `*.mt.html`) の配置先 |
+| `public/` | Web コンテンツ・動的スクリプト (`*.mt.js` / `*.mt.html` / `*.jhtml`) の配置先 |
+| `public/filter.mt.js` | 共通リクエストフィルター（認証・認可・共通前処理） |
 | `lib/` | プロジェクト固有の `$loadLib()` モジュールの配置先 |
-| `conf/` | 設定 JSON (`minto.json`, `table/*.json`, `notify.json` 等) の配置先。<br>`*.local.json` はローカル実行時優先、`*.test.json` はテスト時優先（デプロイ zip からは自動除外）。 |
-| `package.json` | ローカル開発用依存関係 |
+| `conf/` | 設定 JSON (`server.json`, `session.json`, `log.json` 等) の配置先。<br>`*.local.json` はローカル実行時優先（本番設定の上書き用）。 |
+| `data/` | SQLite3 DB ファイル (`session.db` 等) の配置先 |
+| `log/` | 日別ローテーションログファイルの出力先 |
+| `package.json` | プロジェクト設定・npm scripts (`start`, `build`) |
 | `.claude/CLAUDE.md` | 本ファイル |
 
 # あえてやってないこと

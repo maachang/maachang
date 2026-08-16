@@ -35,7 +35,8 @@ const dirs = [
     'public',
     'public/api',
     'lib',
-    'data'
+    'data',
+    '.claude'
 ];
 
 for (const d of dirs) {
@@ -172,9 +173,20 @@ fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({
 // 8. .gitignore
 fs.writeFileSync(path.join(targetDir, '.gitignore'), `node_modules/
 data/
+log/
 *.local.json
 .DS_Store
+.claudeWork/
 `);
+
+// 9. .claude/CLAUDE.md
+const frameworkDir = process.env.MAACHANG_HOME || path.resolve(__dirname, '..');
+const templateClaudeMd = path.join(frameworkDir, 'src', 'project', 'claude.md');
+if (fs.existsSync(templateClaudeMd)) {
+    const rawTemplate = fs.readFileSync(templateClaudeMd, 'utf-8');
+    const projectClaudeMd = rawTemplate.replaceAll('${PROJECT_NAME}', projectName);
+    fs.writeFileSync(path.join(targetDir, '.claude', 'CLAUDE.md'), projectClaudeMd);
+}
 
 console.log(`✅ プロジェクト '${projectName}' の作成が完了しました！\n`);
 console.log(`起動方法:`);
