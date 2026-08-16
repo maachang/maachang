@@ -56,10 +56,18 @@ maachang/ (フレームワーク本体)
 │   └── mcbuild                  # 本番デプロイ用 JHTML 事前コンパイル CLI
 ├── conf/
 │   └── mime.json                # 標準 MIME タイプ定義
-├── modules/
-│   ├── session.js               # SQLite3 セッション管理モジュール
-│   ├── logger.js                # 日別ローテーションロガーモジュール
-│   └── localLog.js              # minto 互換ロガーエイリアス
+├── modules/                     # 共通モジュール群 (詳細は modules/README.md 参照)
+│   ├── session.js               # SQLite3 セッション管理
+│   ├── logger.js / localLog.js  # 日別ローテーションロガー
+│   ├── dateEx.js                # 拡張日時操作・フォーマット
+│   ├── format.js                # 日本語・データ整形 (金額, カナ, バイト等)
+│   ├── encrypt.js               # AES-256-GCM 可逆暗号化・復号
+│   ├── http.js                  # タイムアウト・リトライ付き HTTP クライアント
+│   ├── auth/                    # password, jwt, csrf, rbac, corsFilter
+│   ├── csv/                     # csvReader, csvWriter
+│   ├── validate/                # validate (スキーマバリデーション)
+│   ├── notification/            # sendSlack, sendGithub
+│   └── http/                    # multipart (ファイルアップロード解析)
 ├── src/
 │   ├── index.js                 # Bun.serve メインエントリ
 │   ├── router.js                # ルーティング・静的配信・JS/JHTML 実行
@@ -212,7 +220,69 @@ const monthRange = DateEx.between(now, 'month');
 const inRange = monthRange.isBetween('2026-08-20'); // true
 ```
 
-### 5. 組み込みオブジェクト
+### 5. CSV 操作 (`modules/csv/`)
+
+```javascript
+const { createCsv } = $loadLib('csvWriter.js');
+const { readCsv } = $loadLib('csvReader.js');
+
+// CSV 文字列の生成
+const csvString = createCsv(['id', 'name'], [{ id: 1, name: '山田' }, { id: 2, name: '田中' }]);
+
+// CSV 文字列のパース
+const { headers, rows } = readCsv(csvString);
+```
+
+### 6. 入力バリデーション (`modules/validate/validate.js`)
+
+```javascript
+const validate = $loadLib('validate.js');
+
+const result = validate.check($request.body, {
+    name: { type: 'string', required: true, minLen: 1, maxLen: 50 },
+    age: { type: 'int', required: true, min: 0, max: 120 }
+});
+if (!result.valid) {
+    return $response.json({ errors: result.errors }, 400);
+}
+```
+
+### 7. パスワードハッシュ ＆ JWT (`modules/auth/`)
+
+```javascript
+const password = $loadLib('password.js');
+const jwt = $loadLib('jwt.js');
+
+// パスワードの安全なハッシュ化と照合 (PBKDF2-HMAC-SHA256)
+const hashed = password.hash('myPassword');
+const isMatch = password.verify('myPassword', hashed); // true
+
+// JWT の署名と検証 (HS256)
+const token = jwt.sign({ userId: '123' }, 'secretKey', { expiresIn: 3600 });
+const payload = jwt.verify(token, 'secretKey');
+```
+
+### 8. 日本語整形・暗号化・HTTPクライアント (`modules/`)
+
+```javascript
+// 1. フォーマット整形
+const format = $loadLib('format.js');
+format.money(1250000); // "1,250,000"
+format.toHalfWidth('ＡＢＣ　１２３'); // "ABC 123"
+format.bytes(1048576); // "1.0 MB"
+format.mask('09012345678', 3, 4); // "090****5678"
+
+// 2. AES-256-GCM 可逆暗号化
+const encrypt = $loadLib('encrypt.js');
+const cipher = encrypt.encrypt('SecretData', 'myKey');
+const plain = encrypt.decrypt(cipher, 'myKey'); // "SecretData"
+
+// 3. タイムアウト・リトライ付き HTTP クライアント
+const http = $loadLib('http.js');
+const data = await http.getJson('https://api.example.com/items', { timeout: 3000, retry: 2 });
+```
+
+### 9. 組み込みオブジェクト
 - `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `getHeader()`, `getQuery()`, `getCookie()`
 - `$response` / `$response()`: `status(code)`, `contentType(type, charset)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `redirect(url)`
 - `$loadConf(name)`: `conf/{name}.local.json` または `conf/{name}.json` をロード

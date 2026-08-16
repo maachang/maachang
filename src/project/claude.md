@@ -87,6 +87,29 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`d.toString(mode, format)` / `d.toFormatString(pattern)`**: 日時フォーマット出力（`{yyyy}/{MM}/{dd}({dj}) {hh}:{mm}:{ss}` 等）。
 - **`DateEx.between(date, mode).isBetween(target)`**: 月始・月末などの期間取得および範囲内外判定。
 
+### 4. `password.js` / `jwt.js` / `csrf.js` / `rbac.js`（セキュリティ・認証）
+- **`password.hash(pwd)` / `password.verify(pwd, hashed)`**: PBKDF2-HMAC-SHA256 による安全なパスワードハッシュ化・照合。
+- **`jwt.sign(payload, secret, opt)` / `jwt.verify(token, secret)`**: HS256 による JWT トークン署名・検証。
+- **`csrf.generateToken(sid?)` / `csrf.verify(sid?, token?)`**: セッション連携 CSRF トークン生成・検証。
+- **`rbac.hasRole(role, target)` / `rbac.hasPermission(role, perm)`**: ロール・権限の検証およびルート保護。
+
+### 5. `csvReader.js` / `csvWriter.js`（CSV 操作）
+- **`csvWriter.writeCsv(headers, rows)`**: 配列/オブジェクトデータから CSV 文字列を生成。
+- **`csvReader.readCsv(csvString)`**: CSV 文字列をパースして `{ headers, rows }` オブジェクト配列を取得。
+
+### 6. `validate.js`（バリデーション）
+- **`validate.check(data, schema)`**: スキーマ定義による入力値検証（`type`, `required`, `minLen`, `maxLen`, `min`, `max`, `pattern`, `enum`, `custom`）。
+
+### 7. `sendSlack.js` / `multipart.js`（通信・ファイルアップロード）
+- **`sendSlack.send(webhookUrl, message)`**: Slack Webhook への通知送信。
+- **`multipart.parse(req)`**: `multipart/form-data` によるファイルアップロードの解析。
+
+### 8. `format.js` / `encrypt.js` / `http.js`（整形・暗号化・HTTPクライアント）
+- **`format.money(val)` / `format.toHalfWidth(str)` / `format.bytes(n)` / `format.mask(str)` / `format.truncate(str, len)`**: 日本語業務画面向けフォーマット。
+- **`encrypt.encrypt(plain, key)` / `encrypt.decrypt(cipher, key)`**: AES-256-GCM 可逆暗号化・復号（改ざん検知 AuthTag 付き）。
+- **`encrypt.randomToken(len)` / `encrypt.sha256(str)` / `encrypt.hmac(str, key)`**: ランダムトークン・ハッシュ生成。
+- **`http.get(url, opt)` / `http.postJson(url, data, opt)` / `http.getJson(url, opt)`**: タイムアウト・リトライ付き HTTP クライアント。
+
 ---
 
 # ローカル実行・デプロイ手順
