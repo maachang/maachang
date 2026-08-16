@@ -8,6 +8,12 @@
 
 （このプロジェクト「${PROJECT_NAME}」が何をするものか、ここに記載する）
 
+# 設計思想: 「ファイル配置 ＝ URL」の直感的な PHP 的アプローチ
+
+- **認知負荷ゼロ**: `public/` 配下のファイル構造がそのまま URL パスに対応するクラシカルな SSR / API 構造。SPA や複雑なルーティング設定、巨大な npm 依存による複雑さを排除しています。
+- **AI Native**: 1〜2 ファイルでバックエンド処理と画面描画が完結するため、AI エージェントが迷わず、コンテキストを浪費せずに迅速な機能開発が可能です。
+- **ゼロ外部依存 ＆ 爆速**: Bun 組み込み機能と SQLite3 (`bun:sqlite`) のみで動作し、ミリ秒起動と単一ファイル運用を実現しています。
+
 # インフラ・HTTPS 運用仕様
 
 - **Nginx リバースプロキシ構成**: オンプレミス本番環境では Nginx を前面に配置して運用します。
@@ -73,6 +79,13 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`logger.info(...)`, `logger.warn(...)`, `logger.error(...)`, `logger.debug(...)`, `logger.trace(...)`**:
   - `[YYYY-MM-DD HH:mm:ss.SSS] [LEVEL] メッセージ` 形式で標準出力および `./log/{file}.YYYY-MM-DD.log` へ出力。
 - **`logger.setting({ dir, file, level, stdout })`**: ログ設定変更（`conf/log.json` による自動設定にも対応）。
+
+### 3. `dateEx.js`（日付操作・フォーマット・期間判定ユーティリティ）
+- **`DateEx.create(...)` または `DateEx(...)`**: 日付インスタンス生成（文字列、数値、Date、DateEx から生成可能）。
+- **`d.change(mode, val)`**: 日時加減算（`year`, `month`, `week`, `date`, `hours`, `minutes`, `seconds`, `milliseconds`）。
+- **`d.clear(mode)`**: 日時リセット（`date`, `hours` 等）。
+- **`d.toString(mode, format)` / `d.toFormatString(pattern)`**: 日時フォーマット出力（`{yyyy}/{MM}/{dd}({dj}) {hh}:{mm}:{ss}` 等）。
+- **`DateEx.between(date, mode).isBetween(target)`**: 月始・月末などの期間取得および範囲内外判定。
 
 ---
 

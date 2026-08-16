@@ -6,10 +6,29 @@
 
 ---
 
+## 🧭 設計思想: 「ファイル配置 ＝ URL」の直感的な PHP 的アプローチ
+
+現代の Web 開発は、SPA（React/Vue 等）とバックエンド API の分離、複雑な状態管理、ビルド設定、肥大化する `node_modules` の依存関係など、**「動かす前の準備とメンテナンス」に膨大なコスト** がかかっています。
+
+maachang はあえてこれらと距離を置き、**「PHP のようにディレクトリ構造がそのまま URL に対応し、最小限の JHTML テンプレートで画面が動く」** という、扱いやすく無駄のないクラシカルな SSR モデルを現代の Bun ランタイム上に再構築しました。
+
+### 🌟 4 つのコアバリュー
+
+1. **「ファイル配置 ＝ URL」による認知負荷ゼロ**:
+   - `public/admin/users.mt.html` にファイルを置くだけで `/admin/users` にアクセス可能。ルーティング設定ファイルを探す必要はありません。
+2. **AI Native（Claude Code / Antigravity 親和性）**:
+   - 1〜2 ファイルでサーバーサイド処理と HTML 描画が完結するため、AI エージェントのコンテキスト消費が極小で、プロンプト一発で破綻のないコード生成が可能です。
+3. **ゼロ外部依存 ＆ 爆速起動**:
+   - 外部 npm パッケージ依存なし（Zero Dependency）。`node_modules` の脆弱性管理疲れから解放され、Bun の C++ 高速サーバーによりミリ秒単位で起動します。
+4. **小規模・社内 Web アプリの最適解**:
+   - 業務管理画面、社内ツール、API エンドポイントなど、大規模 SPA が不要な用途において、開発工数・サーバーリソース・運用コストを極限まで圧縮します。
+
+---
+
 ## 💡 特徴
 
 1. **Bun.serve による超高速・ゼロ依存**:
-   - Node.js 不要、外部 npm パッケージ依存なし（ゼロ依存）で高速動作。
+   - Node.js 不要、外部 npm パッケージ依存なしで高速動作。
 2. **minto 規約の踏襲**:
    - **`.mt.js`**: サーバーサイド JavaScript を直接ルーティング・実行。
    - **JHTML (`.mt.html` / `.jhtml`)**: `<% %>`, `<%= %>`, `${ }` を備えたシンプルなテンプレートエンジン。
@@ -17,7 +36,9 @@
    - **安全なアクセス制御**: 内部ファイル（`.mt.js`, `.jhtml.js`, `.mt.html`, `/filter` 等）への直接アクセスは自動で 403 Forbidden 応答。
 3. **SQLite3 標準セッション管理**:
    - `bun:sqlite` を利用した軽量 SQLite3 セッション管理モジュール（`modules/session.js`）を標準搭載。
-4. **プロジェクト単位の実行 ＆ 本番事前コンパイル**:
+4. **日別ローテーションロガー**:
+   - 日別ファイル出力（`./log/logout.YYYY-MM-DD.log`）と標準出力を兼ね備えたロガー（`modules/logger.js`）を内蔵。
+5. **プロジェクト単位の実行 ＆ 本番事前コンパイル**:
    - `mkmc` コマンドで独立したプロジェクト雛形をどこにでも即座に生成。
    - ローカル開発時は `.mt.html` / `.jhtml` をオンデマンド変換して即時確認。
    - 本番環境では `mcbuild` コマンドで事前コンパイル（`.jhtml.js`）して最速実行。
@@ -36,13 +57,18 @@ maachang/ (フレームワーク本体)
 ├── conf/
 │   └── mime.json                # 標準 MIME タイプ定義
 ├── modules/
-│   └── session.js               # SQLite3 セッション管理モジュール
+│   ├── session.js               # SQLite3 セッション管理モジュール
+│   ├── logger.js                # 日別ローテーションロガーモジュール
+│   └── localLog.js              # minto 互換ロガーエイリアス
 ├── src/
 │   ├── index.js                 # Bun.serve メインエントリ
 │   ├── router.js                # ルーティング・静的配信・JS/JHTML 実行
 │   ├── jhtml.js                 # JHTML テンプレートコンパイラ
 │   ├── context.js               # $request, $response, $loadConf, $loadLib, $db
-│   └── db.js                    # bun:sqlite ラッパー
+│   ├── db.js                    # bun:sqlite ラッパー
+│   ├── logger.js                # ロガーコア
+│   └── project/
+│       └── claude.md            # 新規プロジェクト用 CLAUDE.md テンプレート
 ├── public/                      # フレームワーク本体側は空（.gitkeep）
 ├── test/                        # 単体・統合テスト群
 ├── package.json
@@ -88,6 +114,8 @@ my-app/
 │       └── hello.mt.js  # API サンプル
 ├── lib/                 # プロジェクト固有の共通ライブラリ置き場
 ├── data/                # SQLite DB などの保存先
+├── .claude/
+│   └── CLAUDE.md        # AI 開発用指示書 (プロジェクト名展開済み)
 └── package.json
 ```
 
@@ -167,9 +195,26 @@ sessionMod.setSession(current.sid, { userId: '12345', role: 'admin' });
 sessionMod.deleteSession($request, $response);
 ```
 
-### 4. 組み込みオブジェクト
-- `$request`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `getHeader()`, `getQuery()`, `getCookie()`
-- `$response`: `status(code)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `redirect(url)`
+### 4. 日付ユーティリティ (`modules/dateEx.js`)
+
+```javascript
+const DateEx = $loadLib('dateEx.js');
+
+// 日付インスタンスの生成とフォーマット
+const now = DateEx();
+console.log(now.toFormatString('{yyyy}/{MM}/{dd}({dj}) {hh}:{mm}:{ss}')); // 2026/08/16(日) 14:50:00
+
+// 日時加減算 (チェーン可能)
+const nextMonth = DateEx().change('month', 1).change('date', -3);
+
+// 期間内外の判定 (今月内かどうか)
+const monthRange = DateEx.between(now, 'month');
+const inRange = monthRange.isBetween('2026-08-20'); // true
+```
+
+### 5. 組み込みオブジェクト
+- `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `getHeader()`, `getQuery()`, `getCookie()`
+- `$response` / `$response()`: `status(code)`, `contentType(type, charset)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `redirect(url)`
 - `$loadConf(name)`: `conf/{name}.local.json` または `conf/{name}.json` をロード
 - `$loadLib(name)`: `lib/{name}` または `modules/{name}` からモジュールをロード
 - `$db`: SQLite3 操作（`get`, `all`, `run`, `exec`, `transaction`）
