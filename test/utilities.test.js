@@ -77,8 +77,9 @@ describe('Additional Utilities Suite (format, encrypt, http)', () => {
             // 誤った鍵
             expect(encrypt.decrypt(encrypted, 'wrong-key')).toBeNull();
 
-            // 改ざんされた暗号文
-            const tampered = encrypted.slice(0, -2) + 'aa';
+            // 改ざんされた暗号文 (末尾の文字を反転)
+            const lastChar = encrypted.slice(-1);
+            const tampered = encrypted.slice(0, -1) + (lastChar === 'a' ? 'b' : 'a');
             expect(encrypt.decrypt(tampered, secretKey)).toBeNull();
         });
 
