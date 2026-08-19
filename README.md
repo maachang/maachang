@@ -114,15 +114,20 @@ cd my-app
 my-app/
 ├── conf/
 │   ├── server.json      # ポート・ホスト設定
-│   └── session.json     # セッション設定 (SQLite)
+│   ├── session.json     # セッション設定 (SQLite)
+│   └── env.json         # 環境変数定義 (process.env へ自動展開)
 ├── public/
 │   ├── index.html       # トップページ
 │   ├── filter.mt.js     # 共通リクエストフィルター
 │   ├── sample.mt.html   # JHTML テンプレートサンプル
 │   └── api/
 │       └── hello.mt.js  # API サンプル
+├── schema/              # テーブルスキーマ定義 (DDL, SQL, 設計書)
+│   └── README.md
+├── validates/           # バリデーション定義 (入力検証スキーマ)
+│   └── sample.js
 ├── lib/                 # プロジェクト固有の共通ライブラリ置き場
-├── data/                # SQLite DB などの保存先
+├── data/                # SQLite DB などの保存先 (Git管理外)
 ├── .claude/
 │   └── CLAUDE.md        # AI 開発用指示書 (プロジェクト名展開済み)
 └── package.json
@@ -234,21 +239,37 @@ const csvString = createCsv(['id', 'name'], [{ id: 1, name: '山田' }, { id: 2,
 const { headers, rows } = readCsv(csvString);
 ```
 
-### 6. 入力バリデーション (`modules/validate/validate.js`)
+### 6. 入力バリデーション (`modules/validate/validate.js` & `validates/`)
+プロジェクトの `validates/` 配下に定義したスキーマを `$loadLib` で読み込んで検証できます。
 
 ```javascript
-const validate = $loadLib('validate.js');
+// validates/user.js で定義
+// module.exports = {
+//     name:  { type: 'string', required: true, minLen: 1, maxLen: 50 },
+//     email: { type: 'string', mail: true },
+//     age:   { type: 'int', range: [0, 150] }
+// };
 
-const result = validate.check($request.body, {
-    name: { type: 'string', required: true, minLen: 1, maxLen: 50 },
-    age: { type: 'int', required: true, min: 0, max: 120 }
-});
+const validate = $loadLib('validate.js');
+const userSchema = $loadLib('validates/user.js'); // または $loadLib('user.js')
+
+const result = validate.check($request.body, userSchema);
 if (!result.valid) {
     return $response.json({ errors: result.errors }, 400);
 }
+// result.data は default 値が補完された安全なデータ
+```
+※ `range`, `mail`, `url`, `zip`, `tel`, `date`, `time`, `alphaNum` などの事前定義ルールを標準サポートしています。
+
+### 7. 環境変数の管理 (`conf/env.json` & `process.env`)
+`conf/env.json`（およびローカル上書き用の `conf/env.local.json`）に記述したキー・バリューは、サーバー起動時およびリクエスト実行時に自動的に `process.env` に直接展開されます。
+
+```javascript
+// conf/env.json: { "API_URL": "https://api.example.com" }
+const apiUrl = process.env.API_URL;
 ```
 
-### 7. パスワードハッシュ ＆ JWT (`modules/auth/`)
+### 8. パスワードハッシュ ＆ JWT (`modules/auth/`)
 
 ```javascript
 const password = $loadLib('password.js');
@@ -263,7 +284,7 @@ const token = jwt.sign({ userId: '123' }, 'secretKey', { expiresIn: 3600 });
 const payload = jwt.verify(token, 'secretKey');
 ```
 
-### 8. 日本語整形・暗号化・HTTPクライアント (`modules/`)
+### 9. 日本語整形・暗号化・HTTPクライアント (`modules/`)
 
 ```javascript
 // 1. フォーマット整形
@@ -290,11 +311,11 @@ const config = fileUtil.readJson('./conf/app.json', { defaultVal: 1 });
 const safeName = fileUtil.safeFileName('avatar.PNG', ['png', 'jpg'], 'user_');
 ```
 
-### 9. 組み込みオブジェクト
+### 10. 組み込みオブジェクト
 - `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `getHeader()`, `getQuery()`, `getCookie()`
 - `$response` / `$response()`: `status(code)`, `contentType(type, charset)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `redirect(url)`
 - `$loadConf(name)`: `conf/{name}.local.json` または `conf/{name}.json` をロード
-- `$loadLib(name)`: `lib/{name}` または `modules/{name}` からモジュールをロード
+- `$loadLib(name)`: `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` からモジュールをロード
 - `$db`: SQLite3 操作（`get`, `all`, `run`, `exec`, `transaction`）
 
 ---

@@ -32,7 +32,7 @@ maachang が標準提供しているモジュール群のリファレンスで�
 
 ## 🔍 ロード方法 (`$loadLib`)
 
-maachang の実行コンテキストでは、プロジェクト側 `lib/` を最優先し、見つからない場合は `modules/` 直下およびサブディレクトリ（`auth/`, `csv/`, `validate/` 等）を自動探索します。
+maachang の実行コンテキストでは、プロジェクト側 `lib/` および `validates/` を最優先し、見つからない場合は `modules/` 直下およびサブディレクトリ（`auth/`, `csv/`, `validate/` 等）を自動探索します。
 
 ```javascript
 // サブディレクトリ名を省略してフラットに指定可能
@@ -40,6 +40,7 @@ const session = $loadLib('session.js');
 const password = $loadLib('password.js');       // modules/auth/password.js を解決
 const { createCsv } = $loadLib('csvWriter.js'); // modules/csv/csvWriter.js を解決
 const validate = $loadLib('validate.js');       // modules/validate/validate.js を解決
+const userSchema = $loadLib('validates/user.js'); // プロジェクトの validates/user.js を解決
 ```
 
 ---
@@ -319,27 +320,55 @@ while (reader.hasNext()) {
 ---
 
 ### 13. `validate/validate.js` (スキーマバリデーション)
-宣言的なスキーマ定義に基づき、リクエストボディや任意のオブジェクトを検証します。
+宣言的なスキーマ定義に基づき、リクエストボディや任意の JS オブジェクトを検証します。`validates/` ディレクトリ配下にスキーマモジュールを定義して `$loadLib` で共有利用できます。
 
 ```javascript
 const validate = $loadLib('validate.js');
 
+// スキーマ定義例 (validates/user.js 等に定義可能)
 const schema = {
-    name:  { type: 'string', required: true, minLen: 1, maxLen: 50 },
-    age:   { type: 'int', required: true, min: 0, max: 120 },
-    email: { type: 'string', pattern: /^.+@.+\..+$/ },
-    role:  { type: 'string', enum: ['admin', 'user', 'guest'], default: 'user' }
+    name:     { type: 'string', required: true, minLen: 1, maxLen: 50, messages: { required: '名前は必須です' } },
+    email:    { type: 'string', required: true, mail: true },
+    siteUrl:  { type: 'string', url: true },
+    zipCode:  { type: 'string', zip: true },
+    phone:    { type: 'string', tel: true },
+    birthday: { type: 'string', date: true },
+    wakeTime: { type: 'string', time: true },
+    userId:   { type: 'string', alphaNum: true },
+    age:      { type: 'int', range: [0, 150], default: 0 },
+    role:     { type: 'string', enum: ['admin', 'user', 'guest'], default: 'user' }
 };
 
 const result = validate.check($request.body, schema);
 if (!result.valid) {
-    // errors: [{ field: 'name', rule: 'required', message: 'nameは必須です' }, ...]
+    // errors: [{ field: 'email', rule: 'mail', message: 'emailは有効なメールアドレス形式で入力してください' }, ...]
     return $response.json({ errors: result.errors }, 400);
 }
 
 // result.data は default 値が補完された安全なオブジェクト
 const validatedData = result.data;
 ```
+
+#### サポートする検証ルール一覧
+| ルール | 型 | 説明・指定例 |
+|---|---|---|
+| `type` | string | `string` / `int` / `float` / `boolean` / `date` |
+| `required` | boolean | `true` の場合、値が未指定（`undefined`/`null`）ならエラー |
+| `minLen` / `maxLen` | number | 文字列の最小・最大長 |
+| `min` / `max` | number/Date | 数値・日付の最小・最大値 |
+| `range` | Array/Object | 範囲の検証 (`[min, max]` または `{ min, max }`) |
+| `mail` | boolean | メールアドレス形式チェック (`true`) |
+| `url` | boolean | `http` / `https` URL 形式チェック (`true`) |
+| `zip` | boolean | 郵便番号（`123-4567` / `1234567`）チェック (`true`) |
+| `tel` | boolean | 電話番号（固定・携帯・フリーダイヤル等）チェック (`true`) |
+| `date` | boolean | 日付形式（`YYYY-MM-DD` / `YYYY/MM/DD`、実在日判定付き）チェック (`true`) |
+| `time` | boolean | 時刻形式（`HH:mm:ss` / `HH:mm`）チェック (`true`) |
+| `alphaNum` | boolean | 半角英数字のみチェック (`true`) |
+| `pattern` | RegExp | 任意正規表現チェック (`/^[A-Z]{3}$/`) |
+| `enum` | Array | 許可する値の配列 (`['active', 'inactive']`) |
+| `custom` | Function | カスタム検証関数 `(val, allData) => boolean | string` (false またはエラーメッセージで失敗) |
+| `default` | Any/Function | 値が未指定時の補完値または生成関数 |
+| `messages` | Object | ルール別カスタムエラーメッセージ (`{ required: '...', mail: '...' }`) |
 
 ---
 
