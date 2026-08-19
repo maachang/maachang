@@ -61,6 +61,12 @@ fs.writeFileSync(path.join(targetDir, 'conf', 'session.json'), JSON.stringify({
     secure: false
 }, null, 2) + '\n');
 
+// 3. conf/env.json
+fs.writeFileSync(path.join(targetDir, 'conf', 'env.json'), JSON.stringify({
+    APP_NAME: projectName,
+    APP_ENV: 'development'
+}, null, 2) + '\n');
+
 // 3. public/index.html
 fs.writeFileSync(path.join(targetDir, 'public', 'index.html'), `<!DOCTYPE html>
 <html lang="ja">

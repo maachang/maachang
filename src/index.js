@@ -12,6 +12,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { handleRequest } = require('./router.js');
+const { loadEnv } = require('./context.js');
 const logger = require('./logger.js');
 
 /**
@@ -120,6 +121,9 @@ function startServer(customOptions = {}) {
     const baseDir = customOptions.baseDir || cliOptions.baseDir || process.cwd();
     const frameworkDir = process.env.MAACHANG_HOME || path.resolve(__dirname, '..');
     const isDev = customOptions.isDev !== undefined ? customOptions.isDev : cliOptions.isDev;
+
+    // 環境変数の読み込み (conf/env.json, conf/env.local.json -> process.env)
+    loadEnv(baseDir);
 
     // ログ初期化
     initLogger(baseDir);

@@ -61,10 +61,27 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 |---|---|---|
 | `$request` / `$request()` | リクエスト情報の取得 | `.path`, `.method`, `.query`, `.body`, `.cookies`, `.ip`<br>`.getHeader(key)`, `.getQuery(key, def)`, `.getCookie(key, def)` |
 | `$response` / `$response()` | レスポンスの生成・返却 | `.status(code)`, `.contentType(type, charset)`, `.header(key, val)`, `.setCookie(name, val, opt)`, `.deleteCookie(name)`<br>`.json(data, status)`, `.html(str, status)`, `.text(str, status)`, `.redirect(url, status)`, `.body(val)` |
-| `$loadLib("name.js")` | モジュールのロード | `lib/` → `${MAACHANG_HOME}/modules/` の順で検索してロード |
+| `$loadLib("name.js")` | モジュールのロード | `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` の順で検索してロード |
 | `$loadConf("conf名")` | 設定 JSON の取得 | `conf/{conf名}.local.json`（ローカル優先）→ `conf/{conf名}.json` を取得 |
 | `$db` | SQLite3 データベース操作 | `bun:sqlite` ラッパー。<br>`$db.get(sql, params)`, `$db.all(sql, params)`, `$db.run(sql, params)`, `$db.exec(sql)`, `$db.transaction(fn)` |
 | `$require(mod)` | 標準ライブラリ require | `crypto`, `path`, `fs` 等の安全な呼び出し |
+
+---
+
+# 環境変数定義 (`conf/env.json` & `process.env`)
+
+- **環境変数の自動展開**: `conf/env.json` にキー・バリュー形式で定義した設定は、サーバー起動時およびリクエスト実行時に自動的に `process.env` に直接展開されます。
+- **プログラム内からの参照**: スクリプト内（`.mt.js`, `.jhtml`, `lib/` 等）から `process.env.APP_NAME` や `process.env.API_KEY` のように標準の環境変数としてそのまま参照できます。
+- **ローカル環境の上書き (`conf/env.local.json`)**:
+  - `conf/env.local.json` が存在する場合はローカル値が最優先で上書き適用されます（`.gitignore` 済みのため機密情報や開発用キーの保存に利用）。
+  - 例 (`conf/env.json`):
+    ```json
+    {
+      "APP_ENV": "development",
+      "API_BASE_URL": "https://api.example.com",
+      "DEBUG_MODE": "true"
+    }
+    ```
 
 ---
 
@@ -185,7 +202,7 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 | `public/` | Web コンテンツ・動的スクリプト (`*.mt.js` / `*.mt.html` / `*.jhtml`) の配置先 |
 | `public/filter.mt.js` | 共通リクエストフィルター（認証・認可・共通前処理） |
 | `lib/` | プロジェクト固有の `$loadLib()` モジュールの配置先 |
-| `conf/` | 設定 JSON (`server.json`, `session.json`, `log.json` 等) の配置先。<br>`*.local.json` はローカル実行時優先（本番設定の上書き用）。 |
+| `conf/` | 設定 JSON (`server.json`, `session.json`, `env.json`, `log.json` 等) の配置先。<br>`*.local.json` はローカル実行時優先（本番設定の上書き用・Git管理外）。 |
 | `data/` | SQLite3 DB ファイル (`session.db` 等) の配置先 |
 | `schema/` | テーブルスキーマ定義（DDL、SQL、テーブル仕様書）の保存・出力先 |
 | `validates/` | バリデーション定義ファイル（入力検証スキーマ）の保存・配置先 |

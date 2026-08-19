@@ -35,6 +35,7 @@ describe('CLI & Multi-project Execution', () => {
         expect(proc.exitCode).toBe(0);
         expect(fs.existsSync(path.join(tmpProjectDir, 'conf', 'server.json'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'conf', 'session.json'))).toBe(true);
+        expect(fs.existsSync(path.join(tmpProjectDir, 'conf', 'env.json'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'index.html'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'api', 'hello.mt.js'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'sample.mt.html'))).toBe(true);
@@ -46,6 +47,7 @@ describe('CLI & Multi-project Execution', () => {
         expect(claudeMdContent).toContain(path.basename(tmpProjectDir));
         expect(claudeMdContent).toContain('schema/');
         expect(claudeMdContent).toContain('validates/');
+        expect(claudeMdContent).toContain('env.json');
         expect(claudeMdContent).not.toContain('${PROJECT_NAME}');
     });
 
@@ -120,5 +122,43 @@ exports.handler = async function() {
         const goodData = await goodRes.json();
         expect(goodData.success).toBe(true);
         expect(goodData.data.name).toBe('太郎');
+    });
+
+    it('conf/env.json および conf/env.local.json で process.env が設定・上書きされること', async () => {
+        // conf/env.json に環境変数を設定
+        fs.writeFileSync(path.join(tmpProjectDir, 'conf', 'env.json'), JSON.stringify({
+            APP_NAME: 'testApp',
+            SECRET_KEY: 'defaultSecret',
+            MY_SETTING: 'original'
+        }, null, 2));
+
+        // conf/env.local.json で上書き
+        fs.writeFileSync(path.join(tmpProjectDir, 'conf', 'env.local.json'), JSON.stringify({
+            SECRET_KEY: 'localOverriddenSecret'
+        }, null, 2));
+
+        // process.env を参照する API を作成
+        fs.writeFileSync(path.join(tmpProjectDir, 'public', 'api', 'env-test.mt.js'), `
+exports.handler = async function() {
+    return {
+        appName: process.env.APP_NAME,
+        secretKey: process.env.SECRET_KEY,
+        mySetting: process.env.MY_SETTING
+    };
+};
+`);
+
+        const req = new Request('http://localhost:3000/api/env-test');
+        const res = await handleRequest(req, {
+            baseDir: tmpProjectDir,
+            frameworkDir,
+            isDev: false
+        });
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.appName).toBe('testApp');
+        expect(data.mySetting).toBe('original');
+        expect(data.secretKey).toBe('localOverriddenSecret');
     });
 });

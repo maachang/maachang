@@ -17,6 +17,49 @@ const dbWrapper = require('./db.js');
 const _confCache = new Map();
 
 /**
+ * conf/env.json および conf/env.local.json を読み込み process.env にセットする
+ * @param {string} baseDir プロジェクトルートパス
+ * @returns {Object} 読み込まれた環境変数のマップ
+ */
+function loadEnv(baseDir) {
+    if (!baseDir) return {};
+    const loaded = {};
+
+    const projectEnv = path.join(baseDir, 'conf', 'env.json');
+    const localEnv = path.join(baseDir, 'conf', 'env.local.json');
+
+    if (fs.existsSync(projectEnv)) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(projectEnv, 'utf-8'));
+            if (parsed && typeof parsed === 'object') {
+                for (const [k, v] of Object.entries(parsed)) {
+                    process.env[k] = String(v);
+                    loaded[k] = String(v);
+                }
+            }
+        } catch (e) {
+            console.error(`[loadEnv] Error loading ${projectEnv}:`, e.message);
+        }
+    }
+
+    if (fs.existsSync(localEnv)) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(localEnv, 'utf-8'));
+            if (parsed && typeof parsed === 'object') {
+                for (const [k, v] of Object.entries(parsed)) {
+                    process.env[k] = String(v);
+                    loaded[k] = String(v);
+                }
+            }
+        } catch (e) {
+            console.error(`[loadEnv] Error loading ${localEnv}:`, e.message);
+        }
+    }
+
+    return loaded;
+}
+
+/**
  * Cookie文字列をパースする
  * @param {string} cookieHeader 
  * @returns {Object}
@@ -64,6 +107,7 @@ function getClientIp(req, headers) {
  * @returns {Object} context
  */
 function createContext({ req, url, body, baseDir, frameworkDir }) {
+    loadEnv(baseDir);
     const fwDir = frameworkDir || process.env.MAACHANG_HOME || path.resolve(__dirname, '..');
 
     const headers = {};
@@ -336,5 +380,6 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
 module.exports = {
     createContext,
     parseCookies,
-    getClientIp
+    getClientIp,
+    loadEnv
 };
