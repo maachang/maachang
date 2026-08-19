@@ -36,6 +36,8 @@ const dirs = [
     'public/api',
     'lib',
     'data',
+    'schema',
+    'validates',
     '.claude'
 ];
 
@@ -179,7 +181,58 @@ log/
 .claudeWork/
 `);
 
-// 9. .claude/CLAUDE.md
+// 9. schema/README.md
+fs.writeFileSync(path.join(targetDir, 'schema', 'README.md'), `# テーブルスキーマ定義 (${projectName})
+
+このディレクトリにはプロジェクトで利用するデータベースのテーブルスキーマ定義（DDL、SQL、テーブル仕様書）を保存・管理します。
+
+- テーブル作成・変更時は、最新の DDL（例: \`schema.sql\` や \`tables.sql\`）をここに出力・更新してください。
+`);
+
+// 10. validates/sample.js
+fs.writeFileSync(path.join(targetDir, 'validates', 'sample.js'), `/**
+ * バリデーション定義サンプル (validates/sample.js)
+ * 
+ * 利用方法:
+ *   const validate = $loadLib('validate.js');
+ *   const sampleSchema = $loadLib('validates/sample.js'); // または $loadLib('sample.js')
+ *   const result = validate.check($request.body, sampleSchema);
+ *   if (!result.valid) {
+ *       return $response.json({ errors: result.errors }, 400);
+ *   }
+ */
+module.exports = {
+    name: {
+        type: 'string',
+        required: true,
+        minLen: 1,
+        maxLen: 50,
+        messages: {
+            required: '名前は必須です',
+            maxLen: '名前は50文字以内で入力してください'
+        }
+    },
+    email: {
+        type: 'string',
+        required: false,
+        mail: true,
+        messages: {
+            mail: '有効なメールアドレス形式で入力してください'
+        }
+    },
+    age: {
+        type: 'int',
+        required: false,
+        range: [0, 150],
+        messages: {
+            type: '年齢は数値で入力してください',
+            range: '年齢は0歳から150歳の間で入力してください'
+        }
+    }
+};
+`);
+
+// 11. .claude/CLAUDE.md
 const frameworkDir = process.env.MAACHANG_HOME || path.resolve(__dirname, '..');
 const templateClaudeMd = path.join(frameworkDir, 'src', 'project', 'claude.md');
 if (fs.existsSync(templateClaudeMd)) {

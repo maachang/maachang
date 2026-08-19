@@ -125,5 +125,53 @@ describe('Imported Modules Suite', () => {
             expect(invalidResult.valid).toBe(false);
             expect(invalidResult.errors.length).toBe(4);
         });
+
+        it('追加された各種検証ルール (range, mail, url, zip, tel, date, time, alphaNum) が正しく動作すること', () => {
+            const schema = {
+                score:    { type: 'int', range: [1, 100] },
+                email:    { type: 'string', mail: true },
+                homepage: { type: 'string', url: true },
+                postal:   { type: 'string', zip: true },
+                phone:    { type: 'string', tel: true },
+                birth:    { type: 'string', date: true },
+                alarm:    { type: 'string', time: true },
+                code:     { type: 'string', alphaNum: true }
+            };
+
+            // 正常系
+            const validResult = validate.check({
+                score: 85,
+                email: 'user@example.co.jp',
+                homepage: 'https://example.com/path?foo=bar',
+                postal: '100-0001',
+                phone: '090-1234-5678',
+                birth: '2026-08-19',
+                alarm: '07:30:00',
+                code: 'ABC123xyz'
+            }, schema);
+
+            expect(validResult.valid).toBe(true);
+            expect(validResult.errors.length).toBe(0);
+
+            // 異常系
+            const invalidResult = validate.check({
+                score: 150, // range エラー
+                email: 'not-an-email', // mail エラー
+                homepage: 'ftp://invalid-url', // url エラー
+                postal: '12-34', // zip エラー
+                phone: 'abc-def', // tel エラー
+                birth: '2026-02-31', // date エラー (無効な日付)
+                alarm: '25:99:99', // time エラー
+                code: 'hello world!' // alphaNum エラー
+            }, schema);
+
+            expect(invalidResult.valid).toBe(false);
+            expect(invalidResult.errors.length).toBe(8);
+
+            const ruleErrors = invalidResult.errors.map(e => e.rule);
+            expect(ruleErrors).toEqual([
+                'range', 'mail', 'url', 'zip', 'tel', 'date', 'time', 'alphaNum'
+            ]);
+        });
     });
 });

@@ -282,12 +282,24 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         const normalized = libName.endsWith('.js') ? libName : `${libName}.js`;
 
         // 探索順序:
-        // 1. {baseDir}/lib/{normalized}
-        // 2. {fwDir}/modules/{normalized}
-        // 3. {fwDir}/modules/*/{normalized}
+        // 1. {baseDir}/{normalized} (validates/... や lib/... などの指定時)
+        // 2. {baseDir}/lib/{normalized}
+        // 3. {baseDir}/validates/{normalized}
+        // 4. {fwDir}/modules/{normalized}
+        // 5. {fwDir}/modules/*/{normalized}
+        const directProject = path.join(baseDir, normalized);
+        if (fs.existsSync(directProject) && fs.statSync(directProject).isFile()) {
+            return require(directProject);
+        }
+
         const projectLib = path.join(baseDir, 'lib', normalized);
         if (fs.existsSync(projectLib)) {
             return require(projectLib);
+        }
+
+        const projectValidates = path.join(baseDir, 'validates', normalized);
+        if (fs.existsSync(projectValidates)) {
+            return require(projectValidates);
         }
 
         const frameworkDirect = path.join(fwDir, 'modules', normalized);

@@ -17,9 +17,15 @@
 //
 // スキーマ定義例:
 //   validate.check(data, {
-//     name: { type: "string", required: true, minLen: 1, maxLen: 50,
-//             messages: { required: "名前は必須です" } },
-//     age:  { type: "int", min: 0, max: 150 }
+//     name:     { type: "string", required: true, minLen: 1, maxLen: 50, messages: { required: "名前は必須です" } },
+//     age:      { type: "int", min: 0, max: 150, range: [0, 150] },
+//     email:    { type: "string", mail: true },
+//     siteUrl:  { type: "string", url: true },
+//     zipCode:  { type: "string", zip: true },
+//     phone:    { type: "string", tel: true },
+//     birthday: { type: "string", date: true },
+//     wakeTime: { type: "string", time: true },
+//     userId:   { type: "string", alphaNum: true }
 //   });
 //
 // 戻り値: { valid, errors: [{field, rule, message}], data }
@@ -50,6 +56,22 @@
                 return field + "は" + params.min + "以上で入力してください";
             case "max":
                 return field + "は" + params.max + "以下で入力してください";
+            case "range":
+                return field + "は" + params.min + "から" + params.max + "の範囲で入力してください";
+            case "mail":
+                return field + "は有効なメールアドレス形式で入力してください";
+            case "url":
+                return field + "は有効なURL形式(http/https)で入力してください";
+            case "zip":
+                return field + "は有効な郵便番号形式で入力してください";
+            case "tel":
+                return field + "は有効な電話番号形式で入力してください";
+            case "date":
+                return field + "は有効な日付形式(YYYY-MM-DD等)で入力してください";
+            case "time":
+                return field + "は有効な時刻形式(HH:mm:ss等)で入力してください";
+            case "alphaNum":
+                return field + "は半角英数字のみで入力してください";
             case "pattern":
                 return field + "の形式が不正です";
             case "enum":
@@ -59,6 +81,27 @@
             default:
                 return field + "が不正です";
         }
+    };
+
+    // 各種フォーマット検証用 正規表現
+    const _REGEX_MAIL = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const _REGEX_URL = /^https?:\/\/[^\s/$.?#].[^\s]*$/i;
+    const _REGEX_ZIP = /^\d{3}-?\d{4}$/;
+    const _REGEX_TEL = /^0\d{1,4}-?\d{1,4}-?\d{3,4}$/;
+    const _REGEX_DATE = /^(\d{4})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])$/;
+    const _REGEX_TIME = /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+    const _REGEX_ALPHANUM = /^[a-zA-Z0-9]+$/;
+
+    // 文字列が日付として妥当かチェック (yyyy-MM-dd / yyyy/MM/dd)
+    const _isValidDateString = function (s) {
+        if (typeof s !== 'string') return false;
+        const m = s.match(_REGEX_DATE);
+        if (!m) return false;
+        const y = parseInt(m[1], 10);
+        const mo = parseInt(m[2], 10) - 1;
+        const d = parseInt(m[3], 10);
+        const dt = new Date(y, mo, d);
+        return dt.getFullYear() === y && dt.getMonth() === mo && dt.getDate() === d;
     };
 
     // 文字列が整数表記(符号+数字のみ)かチェック.
@@ -98,7 +141,7 @@
         }
     };
 
-    // min/max比較用に値を数値化(date型はgetTime()、数字文字列はNumber化、
+    // min/max/range比較用に値を数値化(date型はgetTime()、数字文字列はNumber化、
     // それ以外はそのまま).
     const _numeric = function (value) {
         if (value instanceof Date) {
@@ -113,7 +156,8 @@
     // 1フィールド分の検証を実施.
     // field フィールド名を設定します.
     // rule スキーマ定義({type, required, default, minLen, maxLen,
-    //      min, max, pattern, enum, custom, messages})を設定します.
+    //      min, max, range, mail, url, zip, tel, date, time, alphaNum,
+    //      pattern, enum, custom, messages})を設定します.
     // value 検証対象の値(dataからの取得値)を設定します.
     // hasValue dataにこのフィールドのキー自体が存在するかを設定します.
     // data 検証対象のオブジェクト全体を設定します(rule.customへ
@@ -158,8 +202,8 @@
             }
         }
 
-        // 数値/日付の範囲チェック.
-        if (rule.type === "int" || rule.type === "float" || rule.type === "date") {
+        // 数値/日付の範囲チェック (min / max).
+        if (rule.type === "int" || rule.type === "float" || rule.type === "date" || typeof value === "number") {
             const n = _numeric(value);
             if (rule.min != undefined && n < _numeric(rule.min)) {
                 return { error: makeError("min", { min: rule.min }), value: value };
@@ -169,7 +213,72 @@
             }
         }
 
-        // 正規表現チェック(string限定).
+        // range (範囲) チェック (配列 [min, max] または オブジェクト { min, max })
+        if (rule.range != undefined) {
+            let rMin, rMax;
+            if (Array.isArray(rule.range)) {
+                rMin = rule.range[0];
+                rMax = rule.range[1];
+            } else if (typeof rule.range === 'object') {
+                rMin = rule.range.min;
+                rMax = rule.range.max;
+            }
+            const n = _numeric(value);
+            if ((rMin != undefined && n < _numeric(rMin)) || (rMax != undefined && n > _numeric(rMax))) {
+                return { error: makeError("range", { min: rMin, max: rMax }), value: value };
+            }
+        }
+
+        // mail (メールアドレス) チェック
+        if (rule.mail === true) {
+            if (typeof value !== 'string' || !_REGEX_MAIL.test(value)) {
+                return { error: makeError("mail"), value: value };
+            }
+        }
+
+        // url (HTTP/HTTPS URL) チェック
+        if (rule.url === true) {
+            if (typeof value !== 'string' || !_REGEX_URL.test(value)) {
+                return { error: makeError("url"), value: value };
+            }
+        }
+
+        // zip (郵便番号) チェック
+        if (rule.zip === true) {
+            if (typeof value !== 'string' || !_REGEX_ZIP.test(value)) {
+                return { error: makeError("zip"), value: value };
+            }
+        }
+
+        // tel (電話番号) チェック
+        if (rule.tel === true) {
+            if (typeof value !== 'string' || !_REGEX_TEL.test(value)) {
+                return { error: makeError("tel"), value: value };
+            }
+        }
+
+        // date (日付文字列) チェック
+        if (rule.date === true) {
+            if (!_isValidDateString(value)) {
+                return { error: makeError("date"), value: value };
+            }
+        }
+
+        // time (時刻文字列) チェック
+        if (rule.time === true) {
+            if (typeof value !== 'string' || !_REGEX_TIME.test(value)) {
+                return { error: makeError("time"), value: value };
+            }
+        }
+
+        // alphaNum (半角英数字) チェック
+        if (rule.alphaNum === true) {
+            if (typeof value !== 'string' || !_REGEX_ALPHANUM.test(value)) {
+                return { error: makeError("alphaNum"), value: value };
+            }
+        }
+
+        // 正規表現チェック(string限定 / pattern).
         if (rule.type === "string" && rule.pattern != undefined) {
             if (!rule.pattern.test(value)) {
                 return { error: makeError("pattern"), value: value };

@@ -38,10 +38,14 @@ describe('CLI & Multi-project Execution', () => {
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'index.html'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'api', 'hello.mt.js'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'sample.mt.html'))).toBe(true);
+        expect(fs.existsSync(path.join(tmpProjectDir, 'schema', 'README.md'))).toBe(true);
+        expect(fs.existsSync(path.join(tmpProjectDir, 'validates', 'sample.js'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, '.claude', 'CLAUDE.md'))).toBe(true);
 
         const claudeMdContent = fs.readFileSync(path.join(tmpProjectDir, '.claude', 'CLAUDE.md'), 'utf-8');
         expect(claudeMdContent).toContain(path.basename(tmpProjectDir));
+        expect(claudeMdContent).toContain('schema/');
+        expect(claudeMdContent).toContain('validates/');
         expect(claudeMdContent).not.toContain('${PROJECT_NAME}');
     });
 
@@ -68,5 +72,53 @@ describe('CLI & Multi-project Execution', () => {
         expect(data.message).toBe('Hello from maachang!');
         expect(data.sessionCount).toBe(1);
         expect(res.headers.get('Set-Cookie')).not.toBeNull();
+    });
+
+    it('生成されたプロジェクトで validates 定義を用いた検証が動作すること', async () => {
+        // テスト用のバリデーション利用 API を作成
+        fs.writeFileSync(path.join(tmpProjectDir, 'public', 'api', 'validate-test.mt.js'), `
+exports.handler = async function() {
+    const validate = $loadLib('validate.js');
+    const sampleSchema = $loadLib('validates/sample.js');
+
+    const result = validate.check($request.body, sampleSchema);
+    if (!result.valid) {
+        return $response.json({ success: false, errors: result.errors }, 400);
+    }
+    return { success: true, data: result.data };
+};
+`);
+
+        // 異常系: 必須チェックエラー
+        const badReq = new Request('http://localhost:3000/api/validate-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ age: 25 })
+        });
+        const badRes = await handleRequest(badReq, {
+            baseDir: tmpProjectDir,
+            frameworkDir,
+            isDev: false
+        });
+        expect(badRes.status).toBe(400);
+        const badData = await badRes.json();
+        expect(badData.success).toBe(false);
+        expect(badData.errors[0].field).toBe('name');
+
+        // 正常系
+        const goodReq = new Request('http://localhost:3000/api/validate-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: '太郎', email: 'taro@example.com', age: 30 })
+        });
+        const goodRes = await handleRequest(goodReq, {
+            baseDir: tmpProjectDir,
+            frameworkDir,
+            isDev: false
+        });
+        expect(goodRes.status).toBe(200);
+        const goodData = await goodRes.json();
+        expect(goodData.success).toBe(true);
+        expect(goodData.data.name).toBe('太郎');
     });
 });

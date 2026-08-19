@@ -32,7 +32,9 @@
 # コーディング規約 & AI 開発ルール
 
 - **独断での仕様決定禁止**: 実装を任された際、詳細仕様（データフィルタリング手法、抽出ロジック、制限値、除外基準など）を独断で決定・補完することは禁止。必ずユーザーの承認を得ること。
-- **車輪の再発明の禁止**: maachang が標準提供しているモジュール（`session.js`, `logger.js`）や組み込みヘルパー（`$request`, `$response`, `$db` 等）を優先活用し、独自ライブラリを安易に自作しない。
+- **車輪の再発明の禁止**: maachang が標準提供しているモジュール（`session.js`, `logger.js`, `validate.js` 等）や組み込みヘルパー（`$request`, `$response`, `$db` 等）を優先活用し、独自ライブラリを安易に自作しない。
+- **テーブルスキーマ定義の出力・管理**: データベース（SQLite3 等）のテーブルを作成・変更した場合は、テーブルスキーマ定義（DDL、SQL、テーブル定義書等）を必ず `schema/` ディレクトリ配下に出力・更新して管理すること。実装やクエリ作成時には `schema/` 内の定義を参照すること。
+- **バリデーション定義の出力・管理**: フォーム入力や API リクエストの検証スキーマは、必ず `validates/` ディレクトリ配下にモジュールとして定義・出力すること（例: `validates/login.js`, `validates/user.js`）。ページや API 実装時はこれを `$loadLib` で読み込み、`validate.js` を用いて検証を行うこと。
 - **既存コメントの維持**: 処理内容が変わって意味が通じなくなる場合を除き、既存コメントを削除しない。
 - **言語ルール**: コメントおよびユーザーへの返答・要約・説明文は常に**日本語**で記述する。
 - **バグ修正フロー**: バグやエラーの原因調査を依頼された場合、即座に修正せず、まず原因と修正方針を報告して承認を得てから修正に着手する。
@@ -97,8 +99,53 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`csvWriter.writeCsv(headers, rows)`**: 配列/オブジェクトデータから CSV 文字列を生成。
 - **`csvReader.readCsv(csvString)`**: CSV 文字列をパースして `{ headers, rows }` オブジェクト配列を取得。
 
-### 6. `validate.js`（バリデーション）
-- **`validate.check(data, schema)`**: スキーマ定義による入力値検証（`type`, `required`, `minLen`, `maxLen`, `min`, `max`, `pattern`, `enum`, `custom`）。
+### 6. `validate.js`（バリデーション & `validates/` 定義）
+- **`validate.check(data, schema)`**: スキーマ定義に従って JS オブジェクトを検証（戻り値: `{ valid, errors: [{field, rule, message}], data }`）。
+- **スキーマ定義の作成方法 (`validates/{name}.js`)**:
+  ```javascript
+  // validates/user.js
+  module.exports = {
+      name:     { type: 'string', required: true, minLen: 1, maxLen: 50, messages: { required: '名前は必須です' } },
+      email:    { type: 'string', required: true, mail: true },
+      siteUrl:  { type: 'string', url: true },
+      zipCode:  { type: 'string', zip: true },
+      phone:    { type: 'string', tel: true },
+      birthday: { type: 'string', date: true },
+      wakeTime: { type: 'string', time: true },
+      userId:   { type: 'string', alphaNum: true },
+      age:      { type: 'int', range: [0, 150], default: 0 }
+  };
+  ```
+- **ページ・API での利用手順**:
+  ```javascript
+  // public/api/users.mt.js または JHTML 内
+  const validate = $loadLib('validate.js');
+  const userSchema = $loadLib('validates/user.js'); // または $loadLib('user.js')
+
+  const result = validate.check($request.body, userSchema);
+  if (!result.valid) {
+      return $response.json({ errors: result.errors }, 400);
+  }
+  // 検証済み・デフォルト値補完済みデータ: result.data
+  ```
+- **サポート属性・ルール一覧**:
+  - `type`: `'string'` / `'int'` / `'float'` / `'boolean'` / `'date'`
+  - `required`: `true` / `false`（必須チェック）
+  - `minLen` / `maxLen`: 文字列の最小・最大長
+  - `min` / `max`: 数値・日付の最小・最大値
+  - `range`: 範囲検証 (`[min, max]` または `{ min, max }`)
+  - `mail`: メールアドレス形式チェック (`true`)
+  - `url`: URL (`http`/`https`) 形式チェック (`true`)
+  - `zip`: 郵便番号形式チェック (`true`, `123-4567` / `1234567`)
+  - `tel`: 電話番号形式チェック (`true`, 固定/携帯/フリーダイヤル等)
+  - `date`: 日付形式チェック (`true`, `yyyy-MM-dd` / `yyyy/MM/dd` 実在日判定付き)
+  - `time`: 時刻形式チェック (`true`, `HH:mm:ss` / `HH:mm`)
+  - `alphaNum`: 半角英数字チェック (`true`)
+  - `pattern`: 任意正規表現 (`RegExp`)
+  - `enum`: 許可値の配列 (`['user', 'admin']` 等)
+  - `custom`: カスタム検証関数 `(val, allData) => boolean | string` (false またはエラーメッセージ文字列で失敗)
+  - `default`: 未指定時の補完値または生成関数
+  - `messages`: ルール別カスタムエラーメッセージ (`{ required: '...', mail: '...', range: '...' }`)
 
 ### 7. `sendSlack.js` / `multipart.js`（通信・ファイルアップロード）
 - **`sendSlack.send(webhookUrl, message)`**: Slack Webhook への通知送信。
@@ -140,6 +187,8 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 | `lib/` | プロジェクト固有の `$loadLib()` モジュールの配置先 |
 | `conf/` | 設定 JSON (`server.json`, `session.json`, `log.json` 等) の配置先。<br>`*.local.json` はローカル実行時優先（本番設定の上書き用）。 |
 | `data/` | SQLite3 DB ファイル (`session.db` 等) の配置先 |
+| `schema/` | テーブルスキーマ定義（DDL、SQL、テーブル仕様書）の保存・出力先 |
+| `validates/` | バリデーション定義ファイル（入力検証スキーマ）の保存・配置先 |
 | `log/` | 日別ローテーションログファイルの出力先 |
 | `package.json` | プロジェクト設定・npm scripts (`start`, `build`) |
 | `.claude/CLAUDE.md` | 本ファイル |
