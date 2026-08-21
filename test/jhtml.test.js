@@ -1,116 +1,101 @@
 /**
  * AIメモ:
- * - jhtml.js の単体テスト。
- * - タグ構文 (<% %>, <%= %>, <%- %>, ${ }, <%# %>) の展開および HTML エスケープのテスト。
- * - $include, $layout, $body, $params の動作検証。
+ * - jhtml.js の単体テスト (minto 互換).
+ * - タグ構文 (<% %>, <%= %>, ${ }, <%# %>) の展開テスト.
+ * - $include 呼び出し時の await 自動補完テスト.
+ * - $params へのアクセスと $out のチェーン呼び出しテスト.
  */
 
 const { describe, it, expect } = require('bun:test');
-const { compileToJs, escapeHtml } = require('../src/jhtml.js');
+const jhtml = require('../src/jhtml.js');
 
-describe('JHTML Compiler', () => {
-    it('HTMLエスケープが正しく動作すること', () => {
-        expect(escapeHtml('<script>alert("xss")</script>')).toBe('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
-        expect(escapeHtml('A & B \' "')).toBe('A &amp; B &#39; &quot;');
-        expect(escapeHtml(null)).toBe('');
-        expect(escapeHtml(undefined)).toBe('');
+describe('JHTML Compiler (minto compatible)', () => {
+    it('基本的な変換が正しく動作すること', async () => {
+        const src = `
+<% const name = "world"; %>
+<h1>Hello <%= name %></h1>
+<p>\${name}</p>
+<%# コメントは出力されない %>
+`;
+        const js = jhtml.convert(src);
+        expect(js).toContain('exports.handler = async function($params)');
+        expect(js).toContain('let _$outString = "";');
+
+        const exp = {};
+        const fn = new Function('exports', 'module', js);
+        fn(exp, { exports: exp });
+
+        const result = await exp.handler();
+        expect(result).toContain('<h1>Hello world</h1>');
+        expect(result).toContain('<p>world</p>');
+        expect(result).not.toContain('コメントは出力されない');
     });
 
-    it('JHTML テンプレートが実行可能な JS にコンパイルされること', async () => {
-        const template = `
-            <% const name = "World"; %>
-            <h1>Hello <%= name %>!</h1>
-            <p>Score: \${100 + 20}</p>
-            <%# ここはコメント %>
-        `;
+    it('$params を受け取ってアクセスできること', async () => {
+        const src = `<h1>\${$params.title}</h1><p>\${$params.count + 1}</p>`;
+        const js = jhtml.convert(src);
 
-        const jsCode = compileToJs(template);
-        expect(jsCode).toContain('exports.handler = async function');
-        expect(jsCode).toContain('$escape(name)');
-        expect(jsCode).toContain('$escape(100 + 20)');
+        const exp = {};
+        const fn = new Function('exports', 'module', js);
+        fn(exp, { exports: exp });
 
-        // 実行検証
-        const exportsObj = {};
-        const fn = new Function('exports', jsCode);
-        fn(exportsObj);
-
-        const result = await exportsObj.handler();
-        expect(result).toContain('<h1>Hello World!</h1>');
-        expect(result).toContain('<p>Score: 120</p>');
-        expect(result).not.toContain('ここはコメント');
+        const result = await exp.handler({ title: 'Minto Title', count: 10 });
+        expect(result.trim()).toBe('<h1>Minto Title</h1><p>11</p>');
     });
 
-    it('<%- ... %> で非エスケープ出力ができること', async () => {
-        const template = `<%- "<b>太字</b>" %>`;
-        const jsCode = compileToJs(template);
+    it('$params 省略時もエラーにならず空オブジェクトとして扱われること', async () => {
+        const src = `<p>\${$params.title || "default"}</p>`;
+        const js = jhtml.convert(src);
 
-        const exportsObj = {};
-        const fn = new Function('exports', jsCode);
-        fn(exportsObj);
+        const exp = {};
+        const fn = new Function('exports', 'module', js);
+        fn(exp, { exports: exp });
 
-        const result = await exportsObj.handler();
-        expect(result).toBe('<b>太字</b>');
+        const result = await exp.handler();
+        expect(result.trim()).toBe('<p>default</p>');
     });
 
-    it('$params / $data / $props 経由で渡された引数が利用できること', async () => {
-        const template = `
-            <h3>\${$data.title}</h3>
-            <p>ユーザー: \${$params.user.name} (\${$props.user.role})</p>
-        `;
-        const jsCode = compileToJs(template);
+    it('$out のチェーン呼び出しができること', async () => {
+        const src = `<% $out("A")("B")("C"); %>`;
+        const js = jhtml.convert(src);
 
-        const exportsObj = {};
-        const fn = new Function('exports', jsCode);
-        fn(exportsObj);
+        const exp = {};
+        const fn = new Function('exports', 'module', js);
+        fn(exp, { exports: exp });
 
-        const result = await exportsObj.handler({
-            title: 'ダッシュボード',
-            user: { name: '山田太郎', role: 'admin' }
-        });
-
-        expect(result).toContain('<h3>ダッシュボード</h3>');
-        expect(result).toContain('<p>ユーザー: 山田太郎 (admin)</p>');
+        const result = await exp.handler();
+        expect(result.trim()).toBe('ABC');
     });
 
-    it('$include ヘルパーが正しく呼び出され、HTML が埋め込まれること', async () => {
-        const template = `
-            <div class="container">
-                <%- await $include("header.mt.html", { title: "トップ" }) %>
-                <main>本文</main>
-            </div>
-        `;
-        const jsCode = compileToJs(template);
+    it('${$include(...)} および <%= $include(...) %> に自動で await が補完されること', () => {
+        const src1 = `<div>\${$include("./header.mt.html")}</div>`;
+        const js1 = jhtml.convert(src1);
+        expect(js1).toContain('$out(await $include("./header.mt.html"));');
 
-        const mockIncludeHelper = async (file, params) => {
+        const src2 = `<div><%= $include("./header.mt.html", { title: "abc" }) %></div>`;
+        const js2 = jhtml.convert(src2);
+        expect(js2).toContain('$out(await $include("./header.mt.html", { title: "abc" }));');
+
+        const src3 = `<div>\${await $include("./header.mt.html")}</div>`;
+        const js3 = jhtml.convert(src3);
+        expect(js3).toContain('$out(await $include("./header.mt.html"));');
+        expect(js3).not.toContain('await await');
+    });
+
+    it('モックの $include 関数を実行してインクルード結果が反映されること', async () => {
+        const src = `<div class="container">\${$include("./header.mt.html", { title: "TopPage" })}<main>Body</main></div>`;
+        const js = jhtml.convert(src);
+
+        const mockInclude = async (path, params) => {
             return `<header><h1>${params.title}</h1></header>`;
         };
 
-        const exportsObj = {};
-        const fn = new Function('exports', '__includeHelper__', '__layoutHelper__', '__currentFile__', jsCode);
-        fn(exportsObj, mockIncludeHelper, null, '/path/to/page.mt.html');
+        const exp = {};
+        const fn = new Function('exports', 'module', '$include', js);
+        fn(exp, { exports: exp }, mockInclude);
 
-        const result = await exportsObj.handler();
-        expect(result).toContain('<header><h1>トップ</h1></header>');
-        expect(result).toContain('<main>本文</main>');
-    });
-
-    it('$layout ヘルパーでレイアウト継承と $body / $content が動作すること', async () => {
-        const template = `
-            <% $layout("layouts/base.mt.html", { title: "商品一覧" }) %>
-            <div class="products">商品リスト</div>
-        `;
-        const jsCode = compileToJs(template);
-
-        const mockLayoutHelper = async (layoutFile, params) => {
-            return `<!DOCTYPE html><html><head><title>${params.title}</title></head><body>${params.$body}</body></html>`;
-        };
-
-        const exportsObj = {};
-        const fn = new Function('exports', '__includeHelper__', '__layoutHelper__', '__currentFile__', jsCode);
-        fn(exportsObj, null, mockLayoutHelper, '/path/to/page.mt.html');
-
-        const result = await exportsObj.handler();
-        expect(result).toContain('<title>商品一覧</title>');
-        expect(result).toContain('<div class="products">商品リスト</div>');
+        const result = await exp.handler();
+        expect(result).toBe('<div class="container"><header><h1>TopPage</h1></header><main>Body</main></div>');
     });
 });
+

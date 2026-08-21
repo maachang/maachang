@@ -44,28 +44,21 @@ describe('Server & Router Integration', () => {
                 return true;
             };
         `);
-        // 5. パーツ & レイアウト
-        fs.mkdirSync(path.join(testProjectDir, 'public', 'components'), { recursive: true });
-        fs.mkdirSync(path.join(testProjectDir, 'public', 'layouts'), { recursive: true });
+        // 5. パーツ & $include
+        fs.mkdirSync(path.join(testProjectDir, 'public', 'parts'), { recursive: true });
 
-        fs.writeFileSync(path.join(testProjectDir, 'public', 'components', '_header.mt.html'), `
-            <header class="app-header"><h1>\${$data.title}</h1></header>
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'parts', 'header.mt.html'), `
+            <header class="app-header"><h1>\${$params.title}</h1></header>
         `);
 
-        fs.writeFileSync(path.join(testProjectDir, 'public', 'layouts', '_base.mt.html'), `
-            <!DOCTYPE html>
-            <html>
-            <head><title>\${$data.title || 'App'}</title></head>
-            <body>
-                <%- await $include('/components/_header.mt.html', { title: $data.title }) %>
-                <div class="content"><%- $body %></div>
-            </body>
-            </html>
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'parts', 'footer.html'), `
+            <footer>footer-content</footer>
         `);
 
         fs.writeFileSync(path.join(testProjectDir, 'public', 'article.mt.html'), `
-            <% $layout('/layouts/_base.mt.html', { title: 'マイ記事' }) %>
+            \${$include("./parts/header.mt.html", { title: "マイ記事" })}
             <article><p>記事本文です</p></article>
+            \${$include("parts/footer.html")}
         `);
     });
 
@@ -102,14 +95,14 @@ describe('Server & Router Integration', () => {
         expect(html).toContain('<h2>My Page</h2>');
     });
 
-    it('$layout および $include によるテンプレート共通化・レイアウト継承が動作すること', async () => {
+    it('$include によるテンプレート部品化・パラメータ渡し・静的HTML埋め込みが動作すること', async () => {
         const req = new Request('http://localhost:3000/article');
         const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
         expect(res.status).toBe(200);
         const html = await res.text();
-        expect(html).toContain('<title>マイ記事</title>');
         expect(html).toContain('<header class="app-header"><h1>マイ記事</h1></header>');
         expect(html).toContain('<article><p>記事本文です</p></article>');
+        expect(html).toContain('<footer>footer-content</footer>');
     });
 
     it('_ で始まる内部ファイルやパーツへの直接アクセスが 403 で拒否されること', async () => {

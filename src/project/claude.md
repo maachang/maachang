@@ -61,13 +61,13 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 |---|---|---|
 | `$request` / `$request()` | リクエスト情報の取得 | `.path`, `.method`, `.query`, `.body`, `.cookies`, `.ip`<br>`.getHeader(key)`, `.getQuery(key, def)`, `.getCookie(key, def)` |
 | `$response` / `$response()` | レスポンスの生成・返却 | `.status(code)`, `.contentType(type, charset)`, `.header(key, val)`, `.setCookie(name, val, opt)`, `.deleteCookie(name)`<br>`.json(data, status)`, `.html(str, status)`, `.text(str, status)`, `.redirect(url, status)`, `.body(val)` |
-| `$include(path, data)` | JHTML パーツの読み込み | `await $include('components/_header.mt.html', { title: '...' })` |
-| `$layout(path, data)` | JHTML レイアウトの継承 | `<% $layout('layouts/_base.mt.html', { title: '...' }) %>`<br>親レイアウト側では `<%- $body %>` または `<%- $content %>` で子コンテンツを展開 |
-| `$data` / `$params` | 渡されたパラメータの参照 | テンプレートやパーツ内で `${$data.title}` や `${$params.user}` としてアクセス |
+| `$include(path, params)` | 別テンプレート/HTMLのインクルード | `${$include("./parts/header.mt.html", { title: "..." })}`<br>（`${$include(...)}` は自動で await 補完） |
+| `$params` | インクルードパラメータの参照 | テンプレートやパーツ内で `${$params.title}` や `${$params.user}` としてアクセス |
 | `$loadLib("name.js")` | モジュールのロード | `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` の順で検索してロード |
 | `$loadConf("conf名")` | 設定 JSON の取得 | `conf/{conf名}.local.json`（ローカル優先）→ `conf/{conf名}.json` を取得 |
 | `$db` | SQLite3 データベース操作 | `bun:sqlite` ラッパー。<br>`$db.get(sql, params)`, `$db.all(sql, params)`, `$db.run(sql, params)`, `$db.exec(sql)`, `$db.transaction(fn)` |
 | `$require(mod)` | 標準ライブラリ require | `crypto`, `path`, `fs` 等の安全な呼び出し |
+
 
 
 ---

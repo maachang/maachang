@@ -63,92 +63,133 @@ function getMimeMap(baseDir, frameworkDir) {
     return _mimeMap;
 }
 
-/**
- * テンプレートファイルのパスを探索して解決する
- * @param {string} filePath 指定されたファイルパス
- * @param {string} [currentFile] 呼び出し元のテンプレートパス
- * @param {string} publicDir public ディレクトリ
- * @returns {string|null}
- */
-function resolveTemplatePath(filePath, currentFile, publicDir) {
-    if (!filePath) return null;
-
-    const candidateBases = [];
-
-    if (filePath.startsWith('/')) {
-        candidateBases.push(path.join(publicDir, filePath.slice(1)));
-        if (fs.existsSync(filePath)) {
-            candidateBases.push(filePath);
-        }
-    } else {
-        if (currentFile) {
-            candidateBases.push(path.resolve(path.dirname(currentFile), filePath));
-        }
-        candidateBases.push(path.resolve(publicDir, filePath));
-        if (path.isAbsolute(filePath)) {
-            candidateBases.push(filePath);
-        }
-    }
-
-    const extensionsToTry = ['', '.mt.html', '.jhtml', '.jhtml.js'];
-
-    for (const base of candidateBases) {
-        for (const ext of extensionsToTry) {
-            const testPath = ext ? `${base}${ext}` : base;
-            if (fs.existsSync(testPath) && fs.statSync(testPath).isFile()) {
-                return testPath;
-            }
-        }
-    }
-
-    return null;
-}
+const _JHTML_SRC_EXTENSION = ".mt.html";
+const _RUN_JHTML = ".jhtml.js";
 
 /**
- * テンプレート実行用ヘルパー (__includeHelper__, __layoutHelper__) を生成
+ * minto 互換の $include ハンドラを生成する
  * @param {Object} context 
  * @param {string} publicDir 
- * @returns {{ includeHelper: Function, layoutHelper: Function }}
+ * @param {boolean} isDev 
+ * @returns {{ $include: Function, _includeStack: string[] }}
  */
-function createTemplateHelpers(context, publicDir) {
-    const includeHelper = async (filePath, includeParams = {}, currentFile = null) => {
-        const resolved = resolveTemplatePath(filePath, currentFile, publicDir);
-        if (!resolved) {
-            throw new Error(`[JHTML $include] Template not found: "${filePath}" (called from: ${currentFile || 'unknown'})`);
+function createIncludeHandler(context, publicDir, isDev = true) {
+    const _includeStack = [];
+
+    const $include = async function (name, params) {
+        if (name == null || typeof name !== "string") {
+            throw new Error("$include: target path must be a non-empty string");
         }
-        const isCompiled = resolved.endsWith('.jhtml.js');
-        const code = isCompiled ? fs.readFileSync(resolved, 'utf-8') : jhtml.compileFile(resolved);
-        return await executeJs(code, context, {
-            currentFile: resolved,
-            params: includeParams,
-            __includeHelper__: includeHelper,
-            __layoutHelper__: layoutHelper
-        });
+        name = name.trim();
+        if (name.length === 0) {
+            throw new Error("$include: target path is empty");
+        }
+        if (_includeStack.length >= 32) {
+            throw new Error("Circular $include detected or maximum include depth exceeded: " + name);
+        }
+
+        // 呼び出し元のディレクトリを特定.
+        const callerPath = _includeStack.length > 0 ? _includeStack[_includeStack.length - 1] : null;
+        const callerDir = callerPath ? path.dirname(callerPath) : publicDir;
+
+        const isRelative = name.startsWith("./") || name.startsWith("../");
+        const isAbsolute = name.startsWith("/");
+
+        const candidateBases = [];
+        if (isAbsolute) {
+            candidateBases.push(path.resolve(publicDir, name.substring(1)));
+        } else if (isRelative) {
+            candidateBases.push(path.resolve(callerDir, name));
+        } else {
+            // callerDir基準とpublic基準の両方を候補とする.
+            candidateBases.push(path.resolve(callerDir, name));
+            const pubBase = path.resolve(publicDir, name);
+            if (candidateBases[0] !== pubBase) {
+                candidateBases.push(pubBase);
+            }
+        }
+
+        // 拡張子に応じた候補パスを展開.
+        const candidates = [];
+        for (let base of candidateBases) {
+            if (base.endsWith(_JHTML_SRC_EXTENSION)) {
+                // .mt.html 指定時
+                if (isDev) {
+                    candidates.push({ path: base, conv: true });
+                    candidates.push({ path: base.substring(0, base.length - _JHTML_SRC_EXTENSION.length) + _RUN_JHTML, conv: false });
+                } else {
+                    candidates.push({ path: base.substring(0, base.length - _JHTML_SRC_EXTENSION.length) + _RUN_JHTML, conv: false });
+                    candidates.push({ path: base, conv: false });
+                }
+            } else if (base.endsWith(_RUN_JHTML)) {
+                // .jhtml.js 指定時
+                if (isDev) {
+                    candidates.push({ path: base.substring(0, base.length - _RUN_JHTML.length) + _JHTML_SRC_EXTENSION, conv: true });
+                    candidates.push({ path: base, conv: false });
+                } else {
+                    candidates.push({ path: base, conv: false });
+                }
+            } else if (base.endsWith(".html") || base.endsWith(".htm")) {
+                // .html / .htm 指定時
+                candidates.push({ path: base, conv: isDev });
+            } else {
+                // 拡張子省略時
+                if (isDev) {
+                    candidates.push({ path: base + _JHTML_SRC_EXTENSION, conv: true });
+                    candidates.push({ path: base + _RUN_JHTML, conv: false });
+                    candidates.push({ path: base + ".html", conv: true });
+                    candidates.push({ path: base + ".htm", conv: true });
+                    candidates.push({ path: base, conv: false });
+                } else {
+                    candidates.push({ path: base + _RUN_JHTML, conv: false });
+                    candidates.push({ path: base + _JHTML_SRC_EXTENSION, conv: false });
+                    candidates.push({ path: base + ".html", conv: false });
+                    candidates.push({ path: base + ".htm", conv: false });
+                    candidates.push({ path: base, conv: false });
+                }
+            }
+        }
+
+        // 存在する候補を探す.
+        let target = null;
+        for (let cand of candidates) {
+            if (fs.existsSync(cand.path) && fs.statSync(cand.path).isFile()) {
+                target = cand;
+                break;
+            }
+        }
+
+        if (!target) {
+            throw new Error("Failed to $include file: " + name);
+        }
+
+        // static html (convなし) の場合、ファイル内容を直接返す.
+        if ((target.path.endsWith(".html") || target.path.endsWith(".htm")) && target.conv === false) {
+            return fs.readFileSync(target.path, "utf8");
+        }
+
+        _includeStack.push(target.path);
+        try {
+            const code = target.conv
+                ? jhtml.compileFile(target.path)
+                : fs.readFileSync(target.path, "utf-8");
+            return await executeJs(code, context, {
+                currentFile: target.path,
+                params: params || {}
+            });
+        } finally {
+            _includeStack.pop();
+        }
     };
 
-    const layoutHelper = async (layoutPath, layoutParams = {}, currentFile = null) => {
-        const resolved = resolveTemplatePath(layoutPath, currentFile, publicDir);
-        if (!resolved) {
-            throw new Error(`[JHTML $layout] Layout template not found: "${layoutPath}" (called from: ${currentFile || 'unknown'})`);
-        }
-        const isCompiled = resolved.endsWith('.jhtml.js');
-        const code = isCompiled ? fs.readFileSync(resolved, 'utf-8') : jhtml.compileFile(resolved);
-        return await executeJs(code, context, {
-            currentFile: resolved,
-            params: layoutParams,
-            __includeHelper__: includeHelper,
-            __layoutHelper__: layoutHelper
-        });
-    };
-
-    return { includeHelper, layoutHelper };
+    return { $include, _includeStack };
 }
 
 /**
  * JSスクリプトを安全に実行する
  * @param {string} jsSource 実行するJSコード
  * @param {Object} context 注入するコンテキストオブジェクト
- * @param {Object} [options] 追加オプション (params, currentFile, __includeHelper__, __layoutHelper__)
+ * @param {Object} [options] 追加オプション (params, currentFile)
  * @returns {Promise<*>} handler() の戻り値
  */
 async function executeJs(jsSource, context, options = {}) {
@@ -165,9 +206,8 @@ async function executeJs(jsSource, context, options = {}) {
         '$require',
         '$db',
         'require',
-        '__includeHelper__',
-        '__layoutHelper__',
-        '__currentFile__'
+        '$include',
+        '$params'
     ];
 
     const argValues = [
@@ -180,9 +220,8 @@ async function executeJs(jsSource, context, options = {}) {
         context.$require,
         context.$db,
         context.$require,
-        options.__includeHelper__,
-        options.__layoutHelper__,
-        options.currentFile
+        context.$include,
+        options.params || {}
     ];
 
     const fn = new Function(...argNames, jsSource);
@@ -190,7 +229,7 @@ async function executeJs(jsSource, context, options = {}) {
 
     const handler = moduleObj.exports.handler || exportsObj.handler;
     if (typeof handler === 'function') {
-        return await handler(options.params);
+        return await handler(options.params || {});
     }
     return undefined;
 }
@@ -265,7 +304,8 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     });
 
     const publicDir = path.join(baseDir, 'public');
-    const { includeHelper, layoutHelper } = createTemplateHelpers(context, publicDir);
+    const { $include, _includeStack } = createIncludeHandler(context, publicDir, isDev);
+    context.$include = $include;
 
     // 3. filter.mt.js の実行
     const filterPath = path.join(publicDir, 'filter.mt.js');
@@ -273,9 +313,7 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         try {
             const filterCode = fs.readFileSync(filterPath, 'utf-8');
             const filterResult = await executeJs(filterCode, context, {
-                currentFile: filterPath,
-                __includeHelper__: includeHelper,
-                __layoutHelper__: layoutHelper
+                currentFile: filterPath
             });
 
             if (context.$response.isHandled()) {
@@ -324,13 +362,13 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         // (1) .mt.js
         const mtJsPath = path.join(publicDir, `${targetRelPath}.mt.js`);
         if (fs.existsSync(mtJsPath)) {
-            return await runDynamicJs(mtJsPath, context, false, { includeHelper, layoutHelper });
+            return await runDynamicJs(mtJsPath, context, false, _includeStack);
         }
 
         // (2) .jhtml.js (事前コンパイル済み)
         const jhtmlJsPath = path.join(publicDir, `${targetRelPath}.jhtml.js`);
         if (fs.existsSync(jhtmlJsPath)) {
-            return await runDynamicJs(jhtmlJsPath, context, true, { includeHelper, layoutHelper });
+            return await runDynamicJs(jhtmlJsPath, context, true, _includeStack);
         }
 
         // (3) .mt.html または .jhtml (ローカル・オンデマンド変換)
@@ -339,7 +377,7 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
 
         if (templatePath) {
-            return await runJhtmlTemplate(templatePath, context, { includeHelper, layoutHelper });
+            return await runJhtmlTemplate(templatePath, context, _includeStack);
         }
 
         // (4) 静的 index.html / index.htm (ディレクトリ指定の場合)
@@ -352,13 +390,13 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const basePath = targetRelPath.slice(0, -ext.length);
         const jhtmlJsPath = path.join(publicDir, `${basePath}.jhtml.js`);
         if (fs.existsSync(jhtmlJsPath)) {
-            return await runDynamicJs(jhtmlJsPath, context, true, { includeHelper, layoutHelper });
+            return await runDynamicJs(jhtmlJsPath, context, true, _includeStack);
         }
         const mtHtmlPath = path.join(publicDir, `${basePath}.mt.html`);
         const jhtmlPath = path.join(publicDir, `${basePath}.jhtml`);
         const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
         if (templatePath) {
-            return await runJhtmlTemplate(templatePath, context, { includeHelper, layoutHelper });
+            return await runJhtmlTemplate(templatePath, context, _includeStack);
         }
     } else {
         // C. 静的ファイル配信
@@ -378,13 +416,14 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
 /**
  * 動的JSを実行してレスポンスを生成
  */
-async function runDynamicJs(filePath, context, isJhtml = false, helpers = {}) {
+async function runDynamicJs(filePath, context, isJhtml = false, includeStack = null) {
+    if (includeStack) {
+        includeStack.push(filePath);
+    }
     try {
         const code = fs.readFileSync(filePath, 'utf-8');
         const result = await executeJs(code, context, {
-            currentFile: filePath,
-            __includeHelper__: helpers.includeHelper,
-            __layoutHelper__: helpers.layoutHelper
+            currentFile: filePath
         });
         return buildResponse(context.$response, result, isJhtml);
     } catch (err) {
@@ -393,19 +432,24 @@ async function runDynamicJs(filePath, context, isJhtml = false, helpers = {}) {
             status: 500,
             headers: { 'Content-Type': 'application/json; charset=utf-8' }
         });
+    } finally {
+        if (includeStack) {
+            includeStack.pop();
+        }
     }
 }
 
 /**
  * JHTMLテンプレートをオンデマンド変換して実行
  */
-async function runJhtmlTemplate(templatePath, context, helpers = {}) {
+async function runJhtmlTemplate(templatePath, context, includeStack = null) {
+    if (includeStack) {
+        includeStack.push(templatePath);
+    }
     try {
         const code = jhtml.compileFile(templatePath);
         const result = await executeJs(code, context, {
-            currentFile: templatePath,
-            __includeHelper__: helpers.includeHelper,
-            __layoutHelper__: helpers.layoutHelper
+            currentFile: templatePath
         });
         return buildResponse(context.$response, result, true);
     } catch (err) {
@@ -414,6 +458,10 @@ async function runJhtmlTemplate(templatePath, context, helpers = {}) {
             status: 500,
             headers: { 'Content-Type': 'application/json; charset=utf-8' }
         });
+    } finally {
+        if (includeStack) {
+            includeStack.pop();
+        }
     }
 }
 

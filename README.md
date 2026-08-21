@@ -191,46 +191,45 @@ exports.handler = async function() {
 </html>
 ```
 
-#### 🧩 パーツ共通化 (`$include`) ＆ レイアウト継承 (`$layout`)
+#### 🧩 テンプレート共通化・パーツ読み込み (`$include` & `$params`)
 
-maachang の JHTML は、ヘッダー・フッターの部品化やページ共通レイアウトをサポートしています。
-（※ `_` で始まるファイルやディレクトリは外部から直接アクセス不可（403）となり安全に保護されます）
+minto の設計に準拠した `$include` により、ヘッダー・フッターなどのパーツ共通化やパラメータ渡しが可能です。
+（※ `${$include(...)}` または `<%= $include(...) %>` 内の呼び出しはコンパイル時に自動で `await` が補完されます）
 
 ```html
-<!-- 1. 共通パーツ: public/components/_header.mt.html -->
+<!-- 1. 共通パーツ: public/parts/header.mt.html -->
 <header class="navbar">
-    <h2>${$data.title}</h2>
-    <span>ログイン中: ${$data.user || 'ゲスト'}</span>
+    <h2>${$params.title}</h2>
+    <span>ログイン中: ${$params.user || 'ゲスト'}</span>
 </header>
 ```
 
 ```html
-<!-- 2. 親レイアウト: public/layouts/_base.mt.html -->
+<!-- 2. 個別ページ: public/dashboard.mt.html -->
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>${$data.title} - 社内ポータル</title>
+    <title>ダッシュボード - 社内ポータル</title>
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <%- await $include('/components/_header.mt.html', { title: $data.title, user: $data.user }) %>
+    ${$include("./parts/header.mt.html", { title: "ダッシュボード", user: "山田太郎" })}
     <main class="container">
-        <%- $body %> <!-- 子テンプレートの内容がここに挿入されます -->
+        <h3>売上サマリー</h3>
+        <p>今月の売上: 1,200,000 円</p>
     </main>
+    ${$include("parts/footer.html")}
 </body>
 </html>
 ```
 
-```html
-<!-- 3. 個別ページ: public/dashboard.mt.html -->
-<% $layout('/layouts/_base.mt.html', { title: 'ダッシュボード', user: '山田太郎' }) %>
+- **パス解決**:
+  - 相対パス（`./header.mt.html` や `../parts/header`）は現在のファイル基準で解決。
+  - `/` から始まるパス（`/parts/header`）は `public/` 基準で解決。
+  - 拡張子省略（`${$include("./parts/header")}`）にも対応（`.mt.html`、`.jhtml.js`、`.html` を自動解決）。
+  - 静的 HTML（`.html` / `.htm`）の直接埋め込みにも対応。
 
-<div class="card">
-    <h3>売上サマリー</h3>
-    <p>今月の売上: 1,200,000 円</p>
-</div>
-```
 
 
 ### 3. セッション管理 (`modules/session.js`)
