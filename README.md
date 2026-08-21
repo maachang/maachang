@@ -225,10 +225,12 @@ minto の設計に準拠した `$include` により、ヘッダー・フッタ�
 ```
 
 - **パス解決**:
-  - 相対パス（`./header.mt.html` や `../parts/header`）は現在のファイル基準で解決。
+  - 相対パス（`./header` や `../parts/header`）は現在のファイル基準で解決。
   - `/` から始まるパス（`/parts/header`）は `public/` 基準で解決。
   - 拡張子省略（`${$include("./parts/header")}`）にも対応（`.mt.html`、`.jhtml.js`、`.html` を自動解決）。
   - 静的 HTML（`.html` / `.htm`）の直接埋め込みにも対応。
+
+※ JHTML の構文仕様や拡張子解決テーブルなどの詳細は [docs/jhtml.md](docs/jhtml.md) を参照してください。
 
 
 
