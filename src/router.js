@@ -64,12 +64,94 @@ function getMimeMap(baseDir, frameworkDir) {
 }
 
 /**
+ * テンプレートファイルのパスを探索して解決する
+ * @param {string} filePath 指定されたファイルパス
+ * @param {string} [currentFile] 呼び出し元のテンプレートパス
+ * @param {string} publicDir public ディレクトリ
+ * @returns {string|null}
+ */
+function resolveTemplatePath(filePath, currentFile, publicDir) {
+    if (!filePath) return null;
+
+    const candidateBases = [];
+
+    if (filePath.startsWith('/')) {
+        candidateBases.push(path.join(publicDir, filePath.slice(1)));
+        if (fs.existsSync(filePath)) {
+            candidateBases.push(filePath);
+        }
+    } else {
+        if (currentFile) {
+            candidateBases.push(path.resolve(path.dirname(currentFile), filePath));
+        }
+        candidateBases.push(path.resolve(publicDir, filePath));
+        if (path.isAbsolute(filePath)) {
+            candidateBases.push(filePath);
+        }
+    }
+
+    const extensionsToTry = ['', '.mt.html', '.jhtml', '.jhtml.js'];
+
+    for (const base of candidateBases) {
+        for (const ext of extensionsToTry) {
+            const testPath = ext ? `${base}${ext}` : base;
+            if (fs.existsSync(testPath) && fs.statSync(testPath).isFile()) {
+                return testPath;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * テンプレート実行用ヘルパー (__includeHelper__, __layoutHelper__) を生成
+ * @param {Object} context 
+ * @param {string} publicDir 
+ * @returns {{ includeHelper: Function, layoutHelper: Function }}
+ */
+function createTemplateHelpers(context, publicDir) {
+    const includeHelper = async (filePath, includeParams = {}, currentFile = null) => {
+        const resolved = resolveTemplatePath(filePath, currentFile, publicDir);
+        if (!resolved) {
+            throw new Error(`[JHTML $include] Template not found: "${filePath}" (called from: ${currentFile || 'unknown'})`);
+        }
+        const isCompiled = resolved.endsWith('.jhtml.js');
+        const code = isCompiled ? fs.readFileSync(resolved, 'utf-8') : jhtml.compileFile(resolved);
+        return await executeJs(code, context, {
+            currentFile: resolved,
+            params: includeParams,
+            __includeHelper__: includeHelper,
+            __layoutHelper__: layoutHelper
+        });
+    };
+
+    const layoutHelper = async (layoutPath, layoutParams = {}, currentFile = null) => {
+        const resolved = resolveTemplatePath(layoutPath, currentFile, publicDir);
+        if (!resolved) {
+            throw new Error(`[JHTML $layout] Layout template not found: "${layoutPath}" (called from: ${currentFile || 'unknown'})`);
+        }
+        const isCompiled = resolved.endsWith('.jhtml.js');
+        const code = isCompiled ? fs.readFileSync(resolved, 'utf-8') : jhtml.compileFile(resolved);
+        return await executeJs(code, context, {
+            currentFile: resolved,
+            params: layoutParams,
+            __includeHelper__: includeHelper,
+            __layoutHelper__: layoutHelper
+        });
+    };
+
+    return { includeHelper, layoutHelper };
+}
+
+/**
  * JSスクリプトを安全に実行する
  * @param {string} jsSource 実行するJSコード
  * @param {Object} context 注入するコンテキストオブジェクト
+ * @param {Object} [options] 追加オプション (params, currentFile, __includeHelper__, __layoutHelper__)
  * @returns {Promise<*>} handler() の戻り値
  */
-async function executeJs(jsSource, context) {
+async function executeJs(jsSource, context, options = {}) {
     const exportsObj = {};
     const moduleObj = { exports: exportsObj };
 
@@ -82,7 +164,10 @@ async function executeJs(jsSource, context) {
         '$loadLib',
         '$require',
         '$db',
-        'require'
+        'require',
+        '__includeHelper__',
+        '__layoutHelper__',
+        '__currentFile__'
     ];
 
     const argValues = [
@@ -94,7 +179,10 @@ async function executeJs(jsSource, context) {
         context.$loadLib,
         context.$require,
         context.$db,
-        context.$require
+        context.$require,
+        options.__includeHelper__,
+        options.__layoutHelper__,
+        options.currentFile
     ];
 
     const fn = new Function(...argNames, jsSource);
@@ -102,7 +190,7 @@ async function executeJs(jsSource, context) {
 
     const handler = moduleObj.exports.handler || exportsObj.handler;
     if (typeof handler === 'function') {
-        return await handler();
+        return await handler(options.params);
     }
     return undefined;
 }
@@ -130,7 +218,11 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     }
 
     // 2. 内部ファイル・直接アクセス禁止チェック
+    const pathSegments = pathname.split('/').filter(Boolean);
+    const isPrivateSegment = pathSegments.some(seg => seg.startsWith('_'));
+
     if (
+        isPrivateSegment ||
         pathname.startsWith('/filter') ||
         pathname.endsWith('.mt.js') ||
         pathname.endsWith('.jhtml.js') ||
@@ -173,13 +265,18 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     });
 
     const publicDir = path.join(baseDir, 'public');
+    const { includeHelper, layoutHelper } = createTemplateHelpers(context, publicDir);
 
     // 3. filter.mt.js の実行
     const filterPath = path.join(publicDir, 'filter.mt.js');
     if (fs.existsSync(filterPath)) {
         try {
             const filterCode = fs.readFileSync(filterPath, 'utf-8');
-            const filterResult = await executeJs(filterCode, context);
+            const filterResult = await executeJs(filterCode, context, {
+                currentFile: filterPath,
+                __includeHelper__: includeHelper,
+                __layoutHelper__: layoutHelper
+            });
 
             if (context.$response.isHandled()) {
                 return buildResponse(context.$response, null, false);
@@ -227,13 +324,13 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         // (1) .mt.js
         const mtJsPath = path.join(publicDir, `${targetRelPath}.mt.js`);
         if (fs.existsSync(mtJsPath)) {
-            return await runDynamicJs(mtJsPath, context, false);
+            return await runDynamicJs(mtJsPath, context, false, { includeHelper, layoutHelper });
         }
 
         // (2) .jhtml.js (事前コンパイル済み)
         const jhtmlJsPath = path.join(publicDir, `${targetRelPath}.jhtml.js`);
         if (fs.existsSync(jhtmlJsPath)) {
-            return await runDynamicJs(jhtmlJsPath, context, true);
+            return await runDynamicJs(jhtmlJsPath, context, true, { includeHelper, layoutHelper });
         }
 
         // (3) .mt.html または .jhtml (ローカル・オンデマンド変換)
@@ -242,7 +339,7 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
 
         if (templatePath) {
-            return await runJhtmlTemplate(templatePath, context);
+            return await runJhtmlTemplate(templatePath, context, { includeHelper, layoutHelper });
         }
 
         // (4) 静的 index.html / index.htm (ディレクトリ指定の場合)
@@ -255,13 +352,13 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const basePath = targetRelPath.slice(0, -ext.length);
         const jhtmlJsPath = path.join(publicDir, `${basePath}.jhtml.js`);
         if (fs.existsSync(jhtmlJsPath)) {
-            return await runDynamicJs(jhtmlJsPath, context, true);
+            return await runDynamicJs(jhtmlJsPath, context, true, { includeHelper, layoutHelper });
         }
         const mtHtmlPath = path.join(publicDir, `${basePath}.mt.html`);
         const jhtmlPath = path.join(publicDir, `${basePath}.jhtml`);
         const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
         if (templatePath) {
-            return await runJhtmlTemplate(templatePath, context);
+            return await runJhtmlTemplate(templatePath, context, { includeHelper, layoutHelper });
         }
     } else {
         // C. 静的ファイル配信
@@ -281,10 +378,14 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
 /**
  * 動的JSを実行してレスポンスを生成
  */
-async function runDynamicJs(filePath, context, isJhtml = false) {
+async function runDynamicJs(filePath, context, isJhtml = false, helpers = {}) {
     try {
         const code = fs.readFileSync(filePath, 'utf-8');
-        const result = await executeJs(code, context);
+        const result = await executeJs(code, context, {
+            currentFile: filePath,
+            __includeHelper__: helpers.includeHelper,
+            __layoutHelper__: helpers.layoutHelper
+        });
         return buildResponse(context.$response, result, isJhtml);
     } catch (err) {
         console.error(`[Error in ${filePath}]`, err);
@@ -298,10 +399,14 @@ async function runDynamicJs(filePath, context, isJhtml = false) {
 /**
  * JHTMLテンプレートをオンデマンド変換して実行
  */
-async function runJhtmlTemplate(templatePath, context) {
+async function runJhtmlTemplate(templatePath, context, helpers = {}) {
     try {
         const code = jhtml.compileFile(templatePath);
-        const result = await executeJs(code, context);
+        const result = await executeJs(code, context, {
+            currentFile: templatePath,
+            __includeHelper__: helpers.includeHelper,
+            __layoutHelper__: helpers.layoutHelper
+        });
         return buildResponse(context.$response, result, true);
     } catch (err) {
         console.error(`[JHTML Error in ${templatePath}]`, err);

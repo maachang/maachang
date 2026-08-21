@@ -46,14 +46,30 @@ function compileToJs(template, options = {}) {
     let jsCode = '';
     
     // コードの先頭定義
-    jsCode += 'exports.handler = async function() {\n';
+    jsCode += 'exports.handler = async function($params = {}) {\n';
     jsCode += '    let __output__ = "";\n';
+    jsCode += '    let __layoutFile__ = null;\n';
+    jsCode += '    let __layoutParams__ = {};\n';
     jsCode += '    const $escape = ' + escapeHtml.toString() + ';\n';
     jsCode += '    const $out = function(s) {\n';
     jsCode += '        if (s !== undefined && s !== null) {\n';
     jsCode += '            __output__ += String(s);\n';
     jsCode += '        }\n';
     jsCode += '        return $out;\n';
+    jsCode += '    };\n';
+    jsCode += '    const $body = ($params && $params.$body !== undefined) ? $params.$body : (($params && $params.$content !== undefined) ? $params.$content : "");\n';
+    jsCode += '    const $content = $body;\n';
+    jsCode += '    const $data = $params || {};\n';
+    jsCode += '    const $props = $params || {};\n';
+    jsCode += '    const $layout = function(layoutPath, layoutParams = {}) {\n';
+    jsCode += '        __layoutFile__ = layoutPath;\n';
+    jsCode += '        __layoutParams__ = layoutParams;\n';
+    jsCode += '    };\n';
+    jsCode += '    const $include = async function(filePath, includeParams = {}) {\n';
+    jsCode += '        if (typeof __includeHelper__ === "function") {\n';
+    jsCode += '            return await __includeHelper__(filePath, includeParams, typeof __currentFile__ !== "undefined" ? __currentFile__ : null);\n';
+    jsCode += '        }\n';
+    jsCode += '        return "";\n';
     jsCode += '    };\n';
 
     // トークン分解正規表現
@@ -101,6 +117,9 @@ function compileToJs(template, options = {}) {
         jsCode += `    $out(${JSON.stringify(remainingText)});\n`;
     }
 
+    jsCode += '    if (__layoutFile__ && typeof __layoutHelper__ === "function") {\n';
+    jsCode += '        return await __layoutHelper__(__layoutFile__, Object.assign({}, __layoutParams__, { $body: __output__, $content: __output__ }), typeof __currentFile__ !== "undefined" ? __currentFile__ : null);\n';
+    jsCode += '    }\n';
     jsCode += '    return __output__;\n';
     jsCode += '};\n';
 

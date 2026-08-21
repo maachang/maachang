@@ -44,6 +44,29 @@ describe('Server & Router Integration', () => {
                 return true;
             };
         `);
+        // 5. パーツ & レイアウト
+        fs.mkdirSync(path.join(testProjectDir, 'public', 'components'), { recursive: true });
+        fs.mkdirSync(path.join(testProjectDir, 'public', 'layouts'), { recursive: true });
+
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'components', '_header.mt.html'), `
+            <header class="app-header"><h1>\${$data.title}</h1></header>
+        `);
+
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'layouts', '_base.mt.html'), `
+            <!DOCTYPE html>
+            <html>
+            <head><title>\${$data.title || 'App'}</title></head>
+            <body>
+                <%- await $include('/components/_header.mt.html', { title: $data.title }) %>
+                <div class="content"><%- $body %></div>
+            </body>
+            </html>
+        `);
+
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'article.mt.html'), `
+            <% $layout('/layouts/_base.mt.html', { title: 'マイ記事' }) %>
+            <article><p>記事本文です</p></article>
+        `);
     });
 
     afterAll(() => {
@@ -77,6 +100,26 @@ describe('Server & Router Integration', () => {
         expect(res.headers.get('Content-Type')).toContain('text/html');
         const html = await res.text();
         expect(html).toContain('<h2>My Page</h2>');
+    });
+
+    it('$layout および $include によるテンプレート共通化・レイアウト継承が動作すること', async () => {
+        const req = new Request('http://localhost:3000/article');
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain('<title>マイ記事</title>');
+        expect(html).toContain('<header class="app-header"><h1>マイ記事</h1></header>');
+        expect(html).toContain('<article><p>記事本文です</p></article>');
+    });
+
+    it('_ で始まる内部ファイルやパーツへの直接アクセスが 403 で拒否されること', async () => {
+        const req1 = new Request('http://localhost:3000/components/_header');
+        const res1 = await handleRequest(req1, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res1.status).toBe(403);
+
+        const req2 = new Request('http://localhost:3000/layouts/_base');
+        const res2 = await handleRequest(req2, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res2.status).toBe(403);
     });
 
     it('.mt.js や /filter への直接アクセスが 403 で拒否されること', async () => {

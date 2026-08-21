@@ -191,6 +191,48 @@ exports.handler = async function() {
 </html>
 ```
 
+#### 🧩 パーツ共通化 (`$include`) ＆ レイアウト継承 (`$layout`)
+
+maachang の JHTML は、ヘッダー・フッターの部品化やページ共通レイアウトをサポートしています。
+（※ `_` で始まるファイルやディレクトリは外部から直接アクセス不可（403）となり安全に保護されます）
+
+```html
+<!-- 1. 共通パーツ: public/components/_header.mt.html -->
+<header class="navbar">
+    <h2>${$data.title}</h2>
+    <span>ログイン中: ${$data.user || 'ゲスト'}</span>
+</header>
+```
+
+```html
+<!-- 2. 親レイアウト: public/layouts/_base.mt.html -->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>${$data.title} - 社内ポータル</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <%- await $include('/components/_header.mt.html', { title: $data.title, user: $data.user }) %>
+    <main class="container">
+        <%- $body %> <!-- 子テンプレートの内容がここに挿入されます -->
+    </main>
+</body>
+</html>
+```
+
+```html
+<!-- 3. 個別ページ: public/dashboard.mt.html -->
+<% $layout('/layouts/_base.mt.html', { title: 'ダッシュボード', user: '山田太郎' }) %>
+
+<div class="card">
+    <h3>売上サマリー</h3>
+    <p>今月の売上: 1,200,000 円</p>
+</div>
+```
+
+
 ### 3. セッション管理 (`modules/session.js`)
 
 ```javascript
