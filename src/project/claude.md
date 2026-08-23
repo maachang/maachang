@@ -72,20 +72,24 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 
 ---
 
-# 環境変数定義 (`conf/env.json` & `process.env`)
+# 環境変数 & 設定ファイル定義 (`conf/*.json`, `process.env`, `$loadConf`)
 
+- **JS コメント (JSONC) 対応**: すべての `conf/*.json`（`env.json`, `server.json`, `session.json`, `log.json`, カスタム設定）で **JavaScript コメント（`//` 単一行、`/* ... */` 複数行）** および末尾カンマが自由に使用可能です。
 - **環境変数の自動展開**: `conf/env.json` にキー・バリュー形式で定義した設定は、サーバー起動時およびリクエスト実行時に自動的に `process.env` に直接展開されます。
 - **プログラム内からの参照**: スクリプト内（`.mt.js`, `.jhtml`, `lib/` 等）から `process.env.APP_NAME` や `process.env.API_KEY` のように標準の環境変数としてそのまま参照できます。
-- **ローカル環境の上書き (`conf/env.local.json`)**:
-  - `conf/env.local.json` が存在する場合はローカル値が最優先で上書き適用されます（`.gitignore` 済みのため機密情報や開発用キーの保存に利用）。
+- **ローカル環境の上書き (`conf/env.local.json`, `conf/*.local.json`)**:
+  - `conf/{name}.local.json` が存在する場合はローカル値が最優先で上書き適用されます（`.gitignore` 済みのため機密情報や開発用キーの保存に利用）。
   - 例 (`conf/env.json`):
     ```json
+    // アプリケーション全体設定
     {
-      "APP_ENV": "development",
+      "APP_ENV": "development", // 開発環境
+      /* 外部連携APIエンドポイント */
       "API_BASE_URL": "https://api.example.com",
-      "DEBUG_MODE": "true"
+      "DEBUG_MODE": "true",
     }
     ```
+
 
 ---
 

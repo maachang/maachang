@@ -347,17 +347,17 @@ const plain = encrypt.decrypt(cipher, 'myKey'); // "SecretData"
 const http = $loadLib('http.js');
 const data = await http.getJson('https://api.example.com/items', { timeout: 3000, retry: 2 });
 
-// 4. ファイル・JSON 入出力支援
+// 4. ファイル・JSON 入出力支援 (JSコメント付き JSONC に対応)
 const fileUtil = $loadLib('fileUtil.js');
 fileUtil.writeJson('./data/backup.json', { key: 'value' }); // ディレクトリ自動作成
-const config = fileUtil.readJson('./conf/app.json', { defaultVal: 1 });
+const config = fileUtil.readJson('./conf/app.json', { defaultVal: 1 }); // // や /* ... */ コメントも安全にパース
 const safeName = fileUtil.safeFileName('avatar.PNG', ['png', 'jpg'], 'user_');
 ```
 
 ### 10. 組み込みオブジェクト
 - `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `getHeader()`, `getQuery()`, `getCookie()`
 - `$response` / `$response()`: `status(code)`, `contentType(type, charset)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `redirect(url)`
-- `$loadConf(name)`: `conf/{name}.local.json` または `conf/{name}.json` をロード
+- `$loadConf(name)`: `conf/{name}.local.json` または `conf/{name}.json` をロード（`//` や `/* ... */` などの **JS コメント** および末尾カンマに対応）
 - `$loadLib(name)`: `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` からモジュールをロード
 - `$db`: SQLite3 操作（`get`, `all`, `run`, `exec`, `transaction`）
 

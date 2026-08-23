@@ -66,7 +66,155 @@ function getExt(fileNameOrPath) {
 }
 
 /**
- * JSON ファイルを安全に読み込み (存在しない場合やパースエラー時は defaultValue を返却)
+ * JSON文字列からJavaScriptコメント (// および /* ... * /) を安全に除去し、末尾カンマも処理する
+ * @param {string} jsonString 
+ * @returns {string}
+ */
+function stripJsonComments(jsonString) {
+    if (typeof jsonString !== 'string') return '';
+    let result = '';
+    let inString = false;
+    let stringQuote = null;
+    let inSingleComment = false;
+    let inMultiComment = false;
+    let isEscaped = false;
+    let pendingComma = false;
+    let pendingWhitespace = '';
+
+    const len = jsonString.length;
+    for (let i = 0; i < len; i++) {
+        const c = jsonString[i];
+        const next = i + 1 < len ? jsonString[i + 1] : '';
+
+        // 単一行コメントの処理
+        if (inSingleComment) {
+            if (c === '\n' || c === '\r') {
+                inSingleComment = false;
+                if (pendingComma) {
+                    pendingWhitespace += c;
+                } else {
+                    result += c;
+                }
+            }
+            continue;
+        }
+
+        // 複数行コメントの処理
+        if (inMultiComment) {
+            if (c === '*' && next === '/') {
+                inMultiComment = false;
+                i++;
+            } else if (c === '\n') {
+                if (pendingComma) {
+                    pendingWhitespace += c;
+                } else {
+                    result += c;
+                }
+            }
+            continue;
+        }
+
+        // 文字列リテラル内の処理
+        if (inString) {
+            result += c;
+            if (isEscaped) {
+                isEscaped = false;
+            } else if (c === '\\') {
+                isEscaped = true;
+            } else if (c === stringQuote) {
+                inString = false;
+                stringQuote = null;
+            }
+            continue;
+        }
+
+        // 空白文字の処理 (カンマ保留中なら蓄積)
+        if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+            if (pendingComma) {
+                pendingWhitespace += c;
+            } else {
+                result += c;
+            }
+            continue;
+        }
+
+        // 単一行コメント // の開始
+        if (c === '/' && next === '/') {
+            inSingleComment = true;
+            i++;
+            continue;
+        }
+
+        // 複数行コメント /* の開始
+        if (c === '/' && next === '*') {
+            inMultiComment = true;
+            i++;
+            continue;
+        }
+
+        // 保留中のカンマがある場合、次の有効文字をチェック
+        if (pendingComma) {
+            if (c === '}' || c === ']') {
+                result += pendingWhitespace + c;
+            } else {
+                result += ',' + pendingWhitespace + c;
+            }
+            pendingComma = false;
+            pendingWhitespace = '';
+
+            if (c === '"' || c === "'") {
+                inString = true;
+                stringQuote = c;
+                isEscaped = false;
+            }
+            continue;
+        }
+
+        // カンマの検出
+        if (c === ',') {
+            pendingComma = true;
+            pendingWhitespace = '';
+            continue;
+        }
+
+        // 文字列開始の検出
+        if (c === '"' || c === "'") {
+            inString = true;
+            stringQuote = c;
+            isEscaped = false;
+            result += c;
+            continue;
+        }
+
+        result += c;
+    }
+
+    if (pendingComma) {
+        result += ',' + pendingWhitespace;
+    }
+
+    return result;
+}
+
+/**
+ * コメント付きJSON (JSONC) 文字列を安全にパースする
+ * @param {string} jsonString 
+ * @param {*} [defaultValue=null] 
+ * @returns {*}
+ */
+function parseJson(jsonString, defaultValue = null) {
+    if (jsonString === null || jsonString === undefined) return defaultValue;
+    try {
+        const stripped = stripJsonComments(String(jsonString).trim());
+        if (!stripped) return defaultValue;
+        return JSON.parse(stripped);
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+/**
+ * JSON ファイルを安全に読み込み (コメント付きJSONC対応、存在しない場合やパースエラー時は defaultValue を返却)
  * @param {string} filePath 
  * @param {*} [defaultValue=null] 
  * @returns {*}
@@ -75,7 +223,7 @@ function readJson(filePath, defaultValue = null) {
     try {
         if (!fs.existsSync(filePath)) return defaultValue;
         const content = fs.readFileSync(filePath, 'utf-8');
-        return JSON.parse(content);
+        return parseJson(content, defaultValue);
     } catch (e) {
         return defaultValue;
     }
@@ -274,6 +422,8 @@ module.exports = {
     exists,
     size,
     getExt,
+    stripJsonComments,
+    parseJson,
     readJson,
     writeJson,
     readText,

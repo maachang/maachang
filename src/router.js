@@ -16,7 +16,7 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
-const { createContext } = require('./context.js');
+const { createContext, parseJson } = require('./context.js');
 const jhtml = require('./jhtml.js');
 
 // MIMEキャッシュ
@@ -35,14 +35,14 @@ function getMimeMap(baseDir, frameworkDir) {
 
     if (fs.existsSync(projectMime)) {
         try {
-            _mimeMap = JSON.parse(fs.readFileSync(projectMime, 'utf-8'));
-            return _mimeMap;
+            _mimeMap = parseJson(fs.readFileSync(projectMime, 'utf-8'));
+            if (_mimeMap) return _mimeMap;
         } catch (e) {}
     }
     if (fs.existsSync(frameworkMime)) {
         try {
-            _mimeMap = JSON.parse(fs.readFileSync(frameworkMime, 'utf-8'));
-            return _mimeMap;
+            _mimeMap = parseJson(fs.readFileSync(frameworkMime, 'utf-8'));
+            if (_mimeMap) return _mimeMap;
         } catch (e) {}
     }
 

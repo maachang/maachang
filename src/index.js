@@ -12,7 +12,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { handleRequest } = require('./router.js');
-const { loadEnv } = require('./context.js');
+const { loadEnv, parseJson } = require('./context.js');
 const logger = require('./logger.js');
 
 /**
@@ -26,11 +26,11 @@ function initLogger(baseDir) {
     let logOptions = null;
     if (fs.existsSync(localLogConf)) {
         try {
-            logOptions = JSON.parse(fs.readFileSync(localLogConf, 'utf-8'));
+            logOptions = parseJson(fs.readFileSync(localLogConf, 'utf-8'));
         } catch (e) {}
     } else if (fs.existsSync(projectLogConf)) {
         try {
-            logOptions = JSON.parse(fs.readFileSync(projectLogConf, 'utf-8'));
+            logOptions = parseJson(fs.readFileSync(projectLogConf, 'utf-8'));
         } catch (e) {}
     }
 
@@ -93,15 +93,15 @@ function resolveServerConfig(baseDir, frameworkDir, cliOptions) {
 
     if (fs.existsSync(localConf)) {
         try {
-            conf = JSON.parse(fs.readFileSync(localConf, 'utf-8'));
+            conf = parseJson(fs.readFileSync(localConf, 'utf-8')) || {};
         } catch (e) {}
     } else if (fs.existsSync(projectConf)) {
         try {
-            conf = JSON.parse(fs.readFileSync(projectConf, 'utf-8'));
+            conf = parseJson(fs.readFileSync(projectConf, 'utf-8')) || {};
         } catch (e) {}
     } else if (fs.existsSync(frameworkConf)) {
         try {
-            conf = JSON.parse(fs.readFileSync(frameworkConf, 'utf-8'));
+            conf = parseJson(fs.readFileSync(frameworkConf, 'utf-8')) || {};
         } catch (e) {}
     }
 

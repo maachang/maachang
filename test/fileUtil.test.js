@@ -38,6 +38,38 @@ describe('fileUtil Module', () => {
         expect(fileUtil.readJson(path.join(testDir, 'not_found.json'), { def: 1 })).toEqual({ def: 1 });
     });
 
+    it('JSコメント (// および /* ... */) や末尾カンマを含む JSONC の読み込みが正しく動作すること', () => {
+        const jsoncContent = `
+        // 設定ファイルのヘッダーコメント
+        /* 
+         * 複数行の
+         * ブロックコメント
+         */
+        {
+            // サーバーポート
+            "port": 3000,
+            "host": "0.0.0.0", /* バインドホスト */
+            "url": "http://localhost:3000/api", // URL内の // はコメントとして除去されないこと
+            "commentStr": "/* not a comment */",
+            "items": [
+                "item1",
+                "item2", // リスト内コメント
+            ], // 配列末尾カンマ
+        } // オブジェクト末尾カンマ
+        `;
+
+        const jsoncPath = path.join(testDir, 'config.jsonc');
+        fs.writeFileSync(jsoncPath, jsoncContent, 'utf-8');
+
+        const parsed = fileUtil.readJson(jsoncPath);
+        expect(parsed).not.toBeNull();
+        expect(parsed.port).toBe(3000);
+        expect(parsed.host).toBe('0.0.0.0');
+        expect(parsed.url).toBe('http://localhost:3000/api');
+        expect(parsed.commentStr).toBe('/* not a comment */');
+        expect(parsed.items).toEqual(['item1', 'item2']);
+    });
+
     it('テキストおよびバイナリの読み書き・サイズ取得が動作すること', () => {
         const txtPath = path.join(testDir, 'hello.txt');
         fileUtil.writeText(txtPath, 'こんにちは maachang');

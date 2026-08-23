@@ -17,6 +17,158 @@ const dbWrapper = require('./db.js');
 const _confCache = new Map();
 
 /**
+ * JSON文字列からJavaScriptコメント (// および /* ... * /) を安全に除去し、末尾カンマも処理する
+ * 文字列リテラル内の // や /*、エスケープシーケンス (\") を考慮
+ * @param {string} jsonString
+ * @returns {string}
+ */
+function stripJsonComments(jsonString) {
+    if (typeof jsonString !== 'string') return '';
+    let result = '';
+    let inString = false;
+    let stringQuote = null;
+    let inSingleComment = false;
+    let inMultiComment = false;
+    let isEscaped = false;
+    let pendingComma = false;
+    let pendingWhitespace = '';
+
+    const len = jsonString.length;
+    for (let i = 0; i < len; i++) {
+        const c = jsonString[i];
+        const next = i + 1 < len ? jsonString[i + 1] : '';
+
+        // 単一行コメントの処理
+        if (inSingleComment) {
+            if (c === '\n' || c === '\r') {
+                inSingleComment = false;
+                if (pendingComma) {
+                    pendingWhitespace += c;
+                } else {
+                    result += c;
+                }
+            }
+            continue;
+        }
+
+        // 複数行コメントの処理
+        if (inMultiComment) {
+            if (c === '*' && next === '/') {
+                inMultiComment = false;
+                i++; // '/' をスキップ
+            } else if (c === '\n') {
+                if (pendingComma) {
+                    pendingWhitespace += c;
+                } else {
+                    result += c;
+                }
+            }
+            continue;
+        }
+
+        // 文字列リテラル内の処理
+        if (inString) {
+            result += c;
+            if (isEscaped) {
+                isEscaped = false;
+            } else if (c === '\\') {
+                isEscaped = true;
+            } else if (c === stringQuote) {
+                inString = false;
+                stringQuote = null;
+            }
+            continue;
+        }
+
+        // 空白文字の処理 (カンマ保留中なら蓄積)
+        if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+            if (pendingComma) {
+                pendingWhitespace += c;
+            } else {
+                result += c;
+            }
+            continue;
+        }
+
+        // 単一行コメント // の開始
+        if (c === '/' && next === '/') {
+            inSingleComment = true;
+            i++;
+            continue;
+        }
+
+        // 複数行コメント /* の開始
+        if (c === '/' && next === '*') {
+            inMultiComment = true;
+            i++;
+            continue;
+        }
+
+        // 保留中のカンマがある場合、次の有効文字をチェック
+        if (pendingComma) {
+            if (c === '}' || c === ']') {
+                // 末尾カンマ (trailing comma) なのでカンマは破棄
+                result += pendingWhitespace + c;
+            } else {
+                // 通常のカンマなのでカンマを出力
+                result += ',' + pendingWhitespace + c;
+            }
+            pendingComma = false;
+            pendingWhitespace = '';
+
+            // 文字列開始のチェック
+            if (c === '"' || c === "'") {
+                inString = true;
+                stringQuote = c;
+                isEscaped = false;
+            }
+            continue;
+        }
+
+        // カンマの検出 (末尾カンマ対応のために保留)
+        if (c === ',') {
+            pendingComma = true;
+            pendingWhitespace = '';
+            continue;
+        }
+
+        // 文字列開始の検出
+        if (c === '"' || c === "'") {
+            inString = true;
+            stringQuote = c;
+            isEscaped = false;
+            result += c;
+            continue;
+        }
+
+        result += c;
+    }
+
+    if (pendingComma) {
+        result += ',' + pendingWhitespace;
+    }
+
+    return result;
+}
+
+/**
+ * コメント付きJSON (JSONC) 文字列を安全にパースする
+ * @param {string} jsonString 
+ * @param {*} [defaultValue=null]
+ * @returns {*}
+ */
+function parseJson(jsonString, defaultValue = null) {
+    if (jsonString === null || jsonString === undefined) return defaultValue;
+    try {
+        const stripped = stripJsonComments(String(jsonString).trim());
+        if (!stripped) return defaultValue;
+        return JSON.parse(stripped);
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+/**
  * conf/env.json および conf/env.local.json を読み込み process.env にセットする
  * @param {string} baseDir プロジェクトルートパス
  * @returns {Object} 読み込まれた環境変数のマップ
@@ -30,7 +182,7 @@ function loadEnv(baseDir) {
 
     if (fs.existsSync(projectEnv)) {
         try {
-            const parsed = JSON.parse(fs.readFileSync(projectEnv, 'utf-8'));
+            const parsed = parseJson(fs.readFileSync(projectEnv, 'utf-8'));
             if (parsed && typeof parsed === 'object') {
                 for (const [k, v] of Object.entries(parsed)) {
                     process.env[k] = String(v);
@@ -44,7 +196,7 @@ function loadEnv(baseDir) {
 
     if (fs.existsSync(localEnv)) {
         try {
-            const parsed = JSON.parse(fs.readFileSync(localEnv, 'utf-8'));
+            const parsed = parseJson(fs.readFileSync(localEnv, 'utf-8'));
             if (parsed && typeof parsed === 'object') {
                 for (const [k, v] of Object.entries(parsed)) {
                     process.env[k] = String(v);
@@ -307,8 +459,10 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
 
         try {
             const content = fs.readFileSync(targetPath, 'utf-8');
-            const parsed = JSON.parse(content);
-            _confCache.set(cacheKey, parsed);
+            const parsed = parseJson(content);
+            if (parsed !== null) {
+                _confCache.set(cacheKey, parsed);
+            }
             return parsed;
         } catch (e) {
             console.error(`[$loadConf] Error loading ${targetPath}:`, e.message);
@@ -381,5 +535,7 @@ module.exports = {
     createContext,
     parseCookies,
     getClientIp,
-    loadEnv
+    loadEnv,
+    stripJsonComments,
+    parseJson
 };

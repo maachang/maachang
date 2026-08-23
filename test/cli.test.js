@@ -124,26 +124,52 @@ exports.handler = async function() {
         expect(goodData.data.name).toBe('太郎');
     });
 
-    it('conf/env.json および conf/env.local.json で process.env が設定・上書きされること', async () => {
-        // conf/env.json に環境変数を設定
-        fs.writeFileSync(path.join(tmpProjectDir, 'conf', 'env.json'), JSON.stringify({
-            APP_NAME: 'testApp',
-            SECRET_KEY: 'defaultSecret',
-            MY_SETTING: 'original'
-        }, null, 2));
+    it('conf/env.json および conf/env.local.json で JSコメント付き設定が読み込まれ process.env が設定・上書きされること', async () => {
+        // conf/env.json にコメント付き環境変数を設定
+        fs.writeFileSync(path.join(tmpProjectDir, 'conf', 'env.json'), `
+        // アプリケーション全体設定
+        /*
+         * 環境変数定義
+         */
+        {
+            // アプリ名
+            "APP_NAME": "testApp",
+            "SECRET_KEY": "defaultSecret", /* 共通シークレット */
+            "MY_SETTING": "original",
+        }
+        `);
 
-        // conf/env.local.json で上書き
-        fs.writeFileSync(path.join(tmpProjectDir, 'conf', 'env.local.json'), JSON.stringify({
-            SECRET_KEY: 'localOverriddenSecret'
-        }, null, 2));
+        // conf/env.local.json で上書き (コメント・末尾カンマ付き)
+        fs.writeFileSync(path.join(tmpProjectDir, 'conf', 'env.local.json'), `
+        // ローカル環境用上書き設定
+        {
+            "SECRET_KEY": "localOverriddenSecret", // ローカル優先
+        }
+        `);
 
-        // process.env を参照する API を作成
+        // カスタム設定 conf/custom.json (コメント付き)
+        fs.writeFileSync(path.join(tmpProjectDir, 'conf', 'custom.json'), `
+        // カスタム設定ファイル
+        {
+            "timeout": 5000, // タイムアウトミリ秒
+            /* 許可ホスト一覧 */
+            "hosts": [
+                "localhost",
+                "127.0.0.1",
+            ],
+        }
+        `);
+
+        // process.env および $loadConf を参照する API を作成
         fs.writeFileSync(path.join(tmpProjectDir, 'public', 'api', 'env-test.mt.js'), `
 exports.handler = async function() {
+    const custom = $loadConf('custom.json');
     return {
         appName: process.env.APP_NAME,
         secretKey: process.env.SECRET_KEY,
-        mySetting: process.env.MY_SETTING
+        mySetting: process.env.MY_SETTING,
+        customTimeout: custom ? custom.timeout : null,
+        customHosts: custom ? custom.hosts : null
     };
 };
 `);
@@ -160,5 +186,7 @@ exports.handler = async function() {
         expect(data.appName).toBe('testApp');
         expect(data.mySetting).toBe('original');
         expect(data.secretKey).toBe('localOverriddenSecret');
+        expect(data.customTimeout).toBe(5000);
+        expect(data.customHosts).toEqual(['localhost', '127.0.0.1']);
     });
 });
