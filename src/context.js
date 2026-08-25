@@ -430,9 +430,11 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         const normalized = confName.endsWith('.json') ? confName : `${confName}.json`;
         const baseName = normalized.replace(/\.json$/, '');
 
+        const isDev = process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production';
+
         // キャッシュキー
         const cacheKey = `${baseDir}:${normalized}`;
-        if (_confCache.has(cacheKey)) {
+        if (!isDev && _confCache.has(cacheKey)) {
             return _confCache.get(cacheKey);
         }
 
@@ -460,7 +462,7 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         try {
             const content = fs.readFileSync(targetPath, 'utf-8');
             const parsed = parseJson(content);
-            if (parsed !== null) {
+            if (parsed !== null && !isDev) {
                 _confCache.set(cacheKey, parsed);
             }
             return parsed;
@@ -487,17 +489,29 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         // 5. {fwDir}/modules/*/{normalized}
         const directProject = path.join(baseDir, normalized);
         if (fs.existsSync(directProject) && fs.statSync(directProject).isFile()) {
-            return require(directProject);
+            const resolved = path.resolve(directProject);
+            if (process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production') {
+                delete require.cache[resolved];
+            }
+            return require(resolved);
         }
 
         const projectLib = path.join(baseDir, 'lib', normalized);
         if (fs.existsSync(projectLib)) {
-            return require(projectLib);
+            const resolved = path.resolve(projectLib);
+            if (process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production') {
+                delete require.cache[resolved];
+            }
+            return require(resolved);
         }
 
         const projectValidates = path.join(baseDir, 'validates', normalized);
         if (fs.existsSync(projectValidates)) {
-            return require(projectValidates);
+            const resolved = path.resolve(projectValidates);
+            if (process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production') {
+                delete require.cache[resolved];
+            }
+            return require(resolved);
         }
 
         const frameworkDirect = path.join(fwDir, 'modules', normalized);
