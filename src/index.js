@@ -145,6 +145,7 @@ function startServer(customOptions = {}) {
     const server = Bun.serve({
         port,
         hostname,
+        idleTimeout: 255,
         async fetch(req) {
             try {
                 return await handleRequest(req, {
