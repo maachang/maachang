@@ -7,12 +7,14 @@
 //   <% ... %>
 //     基本的な組み込みタグ情報
 //   <%= ... %>
-//     実行結果をhtmlとして出力する組み込みタグ.
+//     実行結果をHTMLエスケープして出力する組み込みタグ(XSS対策).
+//   <%- ... %>
+//     実行結果をエスケープせず生のHTMLとして出力する組み込みタグ.
 //   <%# ... %>
 //     コメント用の組み込みタグ.
 //   ${ ... }
 //     実行結果をテンプレートとして出力する組み込みタグ.
-//     <%= ... %> これと内容は同じ.
+//     <%= ... %> これと内容は同じ（HTMLエスケープされる）.
 //     ただ利用推奨としては、変数出力時に利用する.
 //
 // - jhtml組み込み機能.
@@ -20,6 +22,8 @@
 //     stringをhtmlとして出力するFunction.
 //     戻り値が$outのfunctionなので
 //     > $out("abc")(def) ... 的に実装が出来る.
+//   $escape = function(string)
+//     stringのHTML特殊文字(&, <, >, ", ')をエスケープするFunction.
 //   $include = async function(path, params)
 //     別テンプレート(jhtml/html)をインクルードして出力するFunction.
 //     $paramsでパラメータの受け渡しが可能.
@@ -35,6 +39,21 @@
 'use strict';
 
 const fs = require('node:fs');
+
+// HTML特殊文字をエスケープする.
+// s 対象の文字列を設定します.
+// 戻り値: エスケープされた文字列が返却されます.
+const escapeHtml = function (s) {
+    if (s === undefined || s === null) {
+        return "";
+    }
+    return String(s)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+};
 
 // [デフォルト]jhtml出力メソッド名.
 const _OUT = "$out";
@@ -222,7 +241,7 @@ const analysisJHtml = function (jhtml, out) {
                 // 実行処理部分を実装.
                 n = jhtml[start + 2];
                 if (n == "=") {
-                    // 直接出力.
+                    // HTMLエスケープして出力 (<%= ... %>).
                     n = jhtml.substring(start + 3, i).trim();
                     if (n.endsWith(";")) {
                         n = n.substring(0, n.length - 1).trim();
@@ -231,8 +250,29 @@ const analysisJHtml = function (jhtml, out) {
                         ret += "\n";
                     }
                     // $include(...) 呼び出しに await が無い場合は補完.
-                    if (/^\$include\s*\(/.test(n)) {
-                        n = "await " + n;
+                    // $include はテンプレート・HTML展開のためエスケープしない.
+                    if (/^(?:await\s+)?\$include\s*\(/.test(n)) {
+                        if (!/^await\s+/.test(n)) {
+                            n = "await " + n;
+                        }
+                        ret += out + "(" + n + ");\n";
+                    } else {
+                        ret += out + "($escape(" + n + "));\n";
+                    }
+                } else if (n == "-") {
+                    // Raw HTML 直接出力 (<%- ... %>).
+                    n = jhtml.substring(start + 3, i).trim();
+                    if (n.endsWith(";")) {
+                        n = n.substring(0, n.length - 1).trim();
+                    }
+                    if (ret.length != 0) {
+                        ret += "\n";
+                    }
+                    // $include(...) 呼び出しに await が無い場合は補完.
+                    if (/^(?:await\s+)?\$include\s*\(/.test(n)) {
+                        if (!/^await\s+/.test(n)) {
+                            n = "await " + n;
+                        }
                     }
                     ret += out + "(" + n + ");\n";
                 } else if (n == "#") {
@@ -285,6 +325,7 @@ const convert = function (jhtml, outFunc, noOut) {
         // メモリ上にoutメソッドを出力する形で設定します.
         ret = "exports.handler = async function($params) {\n" +
             "if ($params === undefined || $params === null) { $params = {}; }\n" +
+            "const $escape = function(s) { if (s === undefined || s === null) return \"\"; return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\"', '&quot;').replaceAll(\"'\", '&#39;'); };\n" +
             "let _$outString = \"\";\n" +
             "const " + outFunc + " = function(n) { _$outString += (n !== undefined && n !== null ? n : \"\"); return " + outFunc + "; };\n" +
             ret +
@@ -331,5 +372,7 @@ module.exports = {
     indentQuote,
     indentEnter,
     analysis$braces,
-    analysisJHtml
+    analysisJHtml,
+    escapeHtml,
+    escape: escapeHtml
 };

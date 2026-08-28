@@ -82,7 +82,68 @@ describe('JHTML Compiler (minto compatible)', () => {
         expect(js3).not.toContain('await await');
     });
 
-    it('モックの $include 関数を実行してインクルード結果が反映されること', async () => {
+    it('XSS対策: <%= %> および ${ } でHTML特殊文字が自動エスケープされること', async () => {
+        const src = `
+<% const payload = '<script>alert("XSS")</script>'; %>
+<h1><%= payload %></h1>
+<p>\${payload}</p>
+<div>\${'<img src="x" onerror="alert(\\'xss\\')">'}</div>
+<span>\${'Tom & Jerry'}</span>
+`;
+        const js = jhtml.convert(src);
+        const exp = {};
+        const fn = new Function('exports', 'module', js);
+        fn(exp, { exports: exp });
+
+        const result = await exp.handler();
+        expect(result).toContain('&lt;script&gt;alert(&quot;XSS&quot;)&lt;/script&gt;');
+        expect(result).not.toContain('<script>');
+        expect(result).toContain('&lt;img src=&quot;x&quot; onerror=&quot;alert(&#39;xss&#39;)&quot;&gt;');
+        expect(result).toContain('Tom &amp; Jerry');
+    });
+
+    it('Raw出力: <%- %> でHTMLエスケープされずに生のHTMLが出力されること', async () => {
+        const src = `<%- "<strong>Raw HTML & Bold</strong>" %>`;
+        const js = jhtml.convert(src);
+
+        const exp = {};
+        const fn = new Function('exports', 'module', js);
+        fn(exp, { exports: exp });
+
+        const result = await exp.handler();
+        expect(result.trim()).toBe('<strong>Raw HTML & Bold</strong>');
+    });
+
+    it('数値やnull、undefinedが安全に出力されること', async () => {
+        const src = `<p>\${123}</p><p>\${0}</p><p>\${null}</p><p>\${undefined}</p><p>\${false}</p>`;
+        const js = jhtml.convert(src);
+
+        const exp = {};
+        const fn = new Function('exports', 'module', js);
+        fn(exp, { exports: exp });
+
+        const result = await exp.handler();
+        expect(result.trim()).toBe('<p>123</p><p>0</p><p></p><p></p><p>false</p>');
+    });
+
+    it('<%- $include(...) %> にも自動で await が補完され、エスケープされずに出力されること', async () => {
+        const src = `<div><%- $include("./parts/header") %></div>`;
+        const js = jhtml.convert(src);
+        expect(js).toContain('$out(await $include("./parts/header"));');
+
+        const mockInclude = async (path) => {
+            return `<h1>Header Content</h1>`;
+        };
+
+        const exp = {};
+        const fn = new Function('exports', 'module', '$include', js);
+        fn(exp, { exports: exp }, mockInclude);
+
+        const result = await exp.handler();
+        expect(result).toBe('<div><h1>Header Content</h1></div>');
+    });
+
+    it('モックの $include 関数を実行してインクルード結果がエスケープされず反映されること', async () => {
         const src = `<div class="container">\${$include("./header.mt.html", { title: "TopPage" })}<main>Body</main></div>`;
         const js = jhtml.convert(src);
 
@@ -96,6 +157,18 @@ describe('JHTML Compiler (minto compatible)', () => {
 
         const result = await exp.handler();
         expect(result).toBe('<div class="container"><header><h1>TopPage</h1></header><main>Body</main></div>');
+    });
+
+    it('組み込み $escape 関数を手動で呼び出せること', async () => {
+        const src = `<% const escaped = $escape("<b>hello</b>"); %><span><%- escaped %></span>`;
+        const js = jhtml.convert(src);
+
+        const exp = {};
+        const fn = new Function('exports', 'module', js);
+        fn(exp, { exports: exp });
+
+        const result = await exp.handler();
+        expect(result).toBe('<span>&lt;b&gt;hello&lt;/b&gt;</span>');
     });
 });
 
