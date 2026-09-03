@@ -13,6 +13,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { handleRequest } = require('./router.js');
 const { loadEnv, parseJson } = require('./context.js');
+const { handleServerError } = require('./errorHandler.js');
 const logger = require('./logger.js');
 
 /**
@@ -154,16 +155,15 @@ function startServer(customOptions = {}) {
                     isDev
                 });
             } catch (err) {
-                console.error('[Unhandled Server Error]', err);
-                return new Response(JSON.stringify({ error: 'Internal Server Error', message: err.message }), {
-                    status: 500,
-                    headers: { 'Content-Type': 'application/json; charset=utf-8' }
+                return handleServerError(err, req, {
+                    isDev,
+                    title: 'Unhandled Server Error'
                 });
             }
         },
         error(err) {
-            console.error('[Server Error]', err);
-            return new Response(JSON.stringify({ error: 'Server Error', message: err.message }), {
+            logger.error(`[Bun Server Error]\n${err && err.stack ? err.stack : err}`);
+            return new Response(JSON.stringify({ error: 'Server Error', message: isDev ? err.message : 'Internal Server Error' }), {
                 status: 500,
                 headers: { 'Content-Type': 'application/json; charset=utf-8' }
             });

@@ -18,6 +18,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { createContext, parseJson } = require('./context.js');
 const jhtml = require('./jhtml.js');
+const { handleServerError } = require('./errorHandler.js');
 
 // MIMEキャッシュ
 let _mimeMap = null;
@@ -224,7 +225,13 @@ async function executeJs(jsSource, context, options = {}) {
         options.params || {}
     ];
 
-    const fn = new Function(...argNames, jsSource);
+    // sourceURL を付与してスタックトレースで行番号とファイル名を正確に追跡
+    let wrappedSource = jsSource;
+    if (options.currentFile) {
+        wrappedSource += `\n//# sourceURL=${options.currentFile}`;
+    }
+
+    const fn = new Function(...argNames, wrappedSource);
     fn(...argValues);
 
     const handler = moduleObj.exports.handler || exportsObj.handler;
@@ -328,10 +335,10 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
                 });
             }
         } catch (err) {
-            console.error('[Filter Error]', err);
-            return new Response(JSON.stringify({ error: 'Filter Error', message: err.message }), {
-                status: 500,
-                headers: { 'Content-Type': 'application/json; charset=utf-8' }
+            return handleServerError(err, req, {
+                isDev,
+                file: filterPath,
+                title: 'Filter Execution Error'
             });
         }
     }
@@ -362,13 +369,13 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         // (1) .mt.js
         const mtJsPath = path.join(publicDir, `${targetRelPath}.mt.js`);
         if (fs.existsSync(mtJsPath)) {
-            return await runDynamicJs(mtJsPath, context, false, _includeStack);
+            return await runDynamicJs(mtJsPath, req, context, false, isDev, _includeStack);
         }
 
         // (2) .jhtml.js (事前コンパイル済み)
         const jhtmlJsPath = path.join(publicDir, `${targetRelPath}.jhtml.js`);
         if (fs.existsSync(jhtmlJsPath)) {
-            return await runDynamicJs(jhtmlJsPath, context, true, _includeStack);
+            return await runDynamicJs(jhtmlJsPath, req, context, true, isDev, _includeStack);
         }
 
         // (3) .mt.html または .jhtml (ローカル・オンデマンド変換)
@@ -377,7 +384,7 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
 
         if (templatePath) {
-            return await runJhtmlTemplate(templatePath, context, _includeStack);
+            return await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack);
         }
 
         // (4) 静的 index.html / index.htm (ディレクトリ指定の場合)
@@ -390,13 +397,13 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const basePath = targetRelPath.slice(0, -ext.length);
         const jhtmlJsPath = path.join(publicDir, `${basePath}.jhtml.js`);
         if (fs.existsSync(jhtmlJsPath)) {
-            return await runDynamicJs(jhtmlJsPath, context, true, _includeStack);
+            return await runDynamicJs(jhtmlJsPath, req, context, true, isDev, _includeStack);
         }
         const mtHtmlPath = path.join(publicDir, `${basePath}.mt.html`);
         const jhtmlPath = path.join(publicDir, `${basePath}.jhtml`);
         const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
         if (templatePath) {
-            return await runJhtmlTemplate(templatePath, context, _includeStack);
+            return await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack);
         }
     } else {
         // C. 静的ファイル配信
@@ -416,7 +423,7 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
 /**
  * 動的JSを実行してレスポンスを生成
  */
-async function runDynamicJs(filePath, context, isJhtml = false, includeStack = null) {
+async function runDynamicJs(filePath, req, context, isJhtml = false, isDev = true, includeStack = null) {
     if (includeStack) {
         includeStack.push(filePath);
     }
@@ -427,10 +434,10 @@ async function runDynamicJs(filePath, context, isJhtml = false, includeStack = n
         });
         return buildResponse(context.$response, result, isJhtml);
     } catch (err) {
-        console.error(`[Error in ${filePath}]`, err);
-        return new Response(JSON.stringify({ error: 'Execution Error', message: err.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json; charset=utf-8' }
+        return handleServerError(err, req, {
+            isDev,
+            file: filePath,
+            title: isJhtml ? 'JHTML Execution Error' : 'Script Execution Error'
         });
     } finally {
         if (includeStack) {
@@ -442,7 +449,7 @@ async function runDynamicJs(filePath, context, isJhtml = false, includeStack = n
 /**
  * JHTMLテンプレートをオンデマンド変換して実行
  */
-async function runJhtmlTemplate(templatePath, context, includeStack = null) {
+async function runJhtmlTemplate(templatePath, req, context, isDev = true, includeStack = null) {
     if (includeStack) {
         includeStack.push(templatePath);
     }
@@ -453,10 +460,10 @@ async function runJhtmlTemplate(templatePath, context, includeStack = null) {
         });
         return buildResponse(context.$response, result, true);
     } catch (err) {
-        console.error(`[JHTML Error in ${templatePath}]`, err);
-        return new Response(JSON.stringify({ error: 'JHTML Compile Error', message: err.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json; charset=utf-8' }
+        return handleServerError(err, req, {
+            isDev,
+            file: templatePath,
+            title: 'JHTML Error'
         });
     } finally {
         if (includeStack) {
