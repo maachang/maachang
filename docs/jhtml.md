@@ -331,3 +331,63 @@ const app = state({ models: [], activeId: '' }, async (prop, val) => {
 // データを代入するだけで、画面が自動再描画される
 app.models = await api.get('/api/models');
 ```
+
+### 9. フォーマット変換 (`jhtml.format`)
+
+サーバー側（`format.js`）と同じルールで、バイト数表記、金額カンマ区切り、日付、文字列省略をクライアント側でも行えます。
+
+```javascript
+const { format } = jhtml;
+
+format.bytes(10485760);       // "10.0 MB" (モデル・ファイルサイズ表記)
+format.money(1250000);        // "1,250,000"
+format.truncate('長い文章', 5); // "長い文章..."
+format.date(new Date(), 'YYYY/MM/DD HH:mm'); // "2026/09/06 12:30"
+```
+
+### 10. プログレス監視・定期ポーリング (`jhtml.poll`)
+
+ダウンロード進捗や生成タスクの完了待ちなど、非同期タスクのポーリング処理を安全に行います。`true` を返すと自動停止します。
+
+```javascript
+const { poll, api } = jhtml;
+
+// 1秒ごとに進捗を確認し、100% で自動停止
+const stop = poll(async () => {
+    const res = await api.get('/api/models?action=progress');
+    $('#progressBar').style.width = `${res.progress}%`;
+    return res.progress >= 100; // true で自動停止
+}, { interval: 1000, timeout: 60000 });
+
+// 中断したい場合は手動停止も可能: stop();
+```
+
+### 11. トースト & アラート通知 (`jhtml.toast` / `jhtml.alert`)
+
+ユーザーへの完了通知やエラー表示を 1 行で実行できます。
+
+```javascript
+const { toast, alert } = jhtml;
+
+// トースト通知（右下にフェードイン表示され、数秒後に自動消去）
+toast.success('モデルをロードしました');
+toast.error('ダウンロードに失敗しました');
+
+// 既存のアラート要素 (#statusAlert) へのメッセージ注入＆自動タイマー消去
+alert('#statusAlert', '設定を保存しました', { timeout: 3000 });
+```
+
+### 12. クライアントストレージ (`jhtml.storage`)
+
+`localStorage` / `sessionStorage` へのデータ保存・取得を JSON 自動変換付きで行います。
+
+```javascript
+const { storage } = jhtml;
+
+// localStorage (永続設定・履歴)
+storage.set('settings', { theme: 'dark', steps: 30 });
+const settings = storage.get('settings', { theme: 'light' }); // デフォルト値対応
+
+// sessionStorage (タブ内の一時状態)
+storage.session.set('active_tab', 'local');
+```

@@ -391,5 +391,72 @@ describe('jhtml.browser.js (Browser Runtime)', () => {
             expect(watchCalls).toBe(1); // 解除後は発火しない
         });
     });
+
+    describe('9. 追加ユーティリティ (format, poll, alert, storage)', () => {
+        it('format.bytes / money / truncate / date が正常動作すること', () => {
+            const { format } = browserJHtml;
+            expect(format.bytes(1048576)).toBe('1 MB');
+            expect(format.bytes(1073741824 * 2.5)).toBe('2.5 GB');
+            expect(format.money(1250000)).toBe('1,250,000');
+            expect(format.truncate('とても長いテキストです', 5)).toBe('とても長い...');
+            const d = new Date(2026, 8, 6, 12, 30, 45); // 2026-09-06
+            expect(format.date(d, 'YYYY-MM-DD HH:mm:ss')).toBe('2026-09-06 12:30:45');
+        });
+
+        it('poll() で定期実行され、true 返却で停止すること', async () => {
+            let count = 0;
+            const stop = browserJHtml.poll(() => {
+                count++;
+                return count >= 3;
+            }, { interval: 10 });
+
+            await new Promise(r => setTimeout(r, 60));
+            expect(count).toBe(3);
+        });
+
+        it('alert() でメッセージがセットされクラスが制御されること', () => {
+            const mockEl = {
+                textContent: '',
+                style: { display: 'none' },
+                classList: {
+                    add: (c) => mockEl._classes.add(c),
+                    remove: (c) => mockEl._classes.delete(c)
+                },
+                _classes: new Set()
+            };
+
+            global.document = {
+                getElementById: () => mockEl,
+                querySelector: () => mockEl
+            };
+
+            browserJHtml.alert(mockEl, 'エラーです', { isError: true, timeout: 0 });
+            expect(mockEl.textContent).toBe('エラーです');
+            expect(mockEl._classes.has('alert-error')).toBe(true);
+            expect(mockEl.style.display).toBe('block');
+
+            delete global.document;
+        });
+
+        it('storage で JSON シリアライズ・デシリアライズができること', () => {
+            const store = {};
+            global.window = {
+                localStorage: {
+                    getItem: (k) => store[k] !== undefined ? store[k] : null,
+                    setItem: (k, v) => { store[k] = v; },
+                    removeItem: (k) => { delete store[k]; },
+                    clear: () => { Object.keys(store).forEach(k => delete store[k]); }
+                }
+            };
+
+            const { storage } = browserJHtml;
+            storage.set('settings', { theme: 'dark', zoom: 1.2 });
+            const loaded = storage.get('settings');
+            expect(loaded).toEqual({ theme: 'dark', zoom: 1.2 });
+            expect(storage.get('missing', 'default')).toBe('default');
+
+            delete global.window;
+        });
+    });
 });
 

@@ -208,6 +208,10 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
   - `jhtml.form(container)` / `jhtml.form.fill(container, data)`: フォーム入力値のオブジェクト一括取得および一括流し込み。
   - `jhtml.show` / `jhtml.hide` / `jhtml.toggle` / `jhtml.addClass` / `jhtml.removeClass`: 表示制御およびクラス操作糖衣構文。
   - `jhtml.state(init, onChange)`: プロパティ更新で画面が連動する極小リアクティブ状態オブジェクト。
+  - `jhtml.format`: バイト数表記 (`format.bytes`)、金額 (`format.money`)、日付 (`format.date`)、省略 (`format.truncate`)。
+  - `jhtml.poll(fn, opts)`: プログレス監視・完了判定付き定期ポーリング。
+  - `jhtml.toast` / `jhtml.alert`: トースト通知およびアラート要素への自動消去メッセージ注入。
+  - `jhtml.storage`: JSON 自動シリアライズ対応 localStorage / sessionStorage ラッパー。
 
 ---
 

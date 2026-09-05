@@ -649,6 +649,224 @@
         return proxy;
     }
 
+    /**
+     * フォーマット変換ユーティリティ (maachang modules/format.js 互換)
+     */
+    const format = {
+        bytes: function (bytes, decimals = 1) {
+            if (bytes === 0 || bytes === '0') return '0 B';
+            const num = Number(bytes);
+            if (!num || isNaN(num) || num < 0) return '0 B';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+            const i = Math.floor(Math.log(num) / Math.log(k));
+            const formatted = parseFloat((num / Math.pow(k, i)).toFixed(dm));
+            return `${formatted} ${sizes[i] || 'PB'}`;
+        },
+        money: function (value, prefix = '') {
+            if (value === null || value === undefined || value === '') return '';
+            const parts = String(value).split('.');
+            parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            return prefix + parts.join('.');
+        },
+        truncate: function (str, maxLen = 30, suffix = '...') {
+            if (!str) return '';
+            const s = String(str);
+            return s.length > maxLen ? s.slice(0, maxLen) + suffix : s;
+        },
+        date: function (dateVal, pattern = 'YYYY/MM/DD HH:mm') {
+            if (!dateVal) return '';
+            const d = dateVal instanceof Date ? dateVal : new Date(dateVal);
+            if (isNaN(d.getTime())) return String(dateVal);
+
+            const pad = (n) => String(n).padStart(2, '0');
+            const YYYY = String(d.getFullYear());
+            const MM = pad(d.getMonth() + 1);
+            const DD = pad(d.getDate());
+            const HH = pad(d.getHours());
+            const mm = pad(d.getMinutes());
+            const ss = pad(d.getSeconds());
+
+            return pattern
+                .replace('YYYY', YYYY)
+                .replace('MM', MM)
+                .replace('DD', DD)
+                .replace('HH', HH)
+                .replace('mm', mm)
+                .replace('ss', ss);
+        }
+    };
+
+    /**
+     * 定期実行・プログレス監視ユーティリティ (jhtml.poll)
+     * @param {Function} task 非同期関数。true を返すと自動停止
+     * @param {Object} [options]
+     * @param {number} [options.interval=1000] ポーリング間隔(ms)
+     * @param {number} [options.timeout=0] タイムアウト(ms, 0=無限)
+     * @returns {Function} 手動停止関数 stop()
+     */
+    function poll(task, options = {}) {
+        const interval = options.interval || 1000;
+        const timeout = options.timeout || 0;
+        let timer = null;
+        let isStopped = false;
+        const startTime = Date.now();
+
+        const stop = () => {
+            isStopped = true;
+            if (timer) clearTimeout(timer);
+        };
+
+        const tick = async () => {
+            if (isStopped) return;
+            if (timeout > 0 && Date.now() - startTime >= timeout) {
+                stop();
+                if (typeof options.onTimeout === 'function') options.onTimeout();
+                return;
+            }
+
+            try {
+                const done = await task();
+                if (done === true) {
+                    stop();
+                    return;
+                }
+            } catch (err) {
+                if (typeof options.onError === 'function') options.onError(err);
+            }
+
+            if (!isStopped) {
+                timer = setTimeout(tick, interval);
+            }
+        };
+
+        timer = setTimeout(tick, 0);
+        return stop;
+    }
+
+    /**
+     * トースト通知ユーティリティ (jhtml.toast)
+     */
+    function toast(message, options = {}) {
+        if (typeof document === 'undefined') return;
+        const type = options.type || 'info'; // 'info', 'success', 'error', 'warning'
+        const duration = options.duration !== undefined ? options.duration : 3000;
+
+        let container = document.getElementById('_jhtml_toast_container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = '_jhtml_toast_container';
+            container.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
+            document.body.appendChild(container);
+        }
+
+        const item = document.createElement('div');
+        item.style.cssText = 'padding:12px 18px;border-radius:8px;font-size:14px;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,0.15);pointer-events:auto;transition:opacity 0.25s,transform 0.25s;opacity:0;transform:translateY(10px);max-width:360px;word-break:break-all;';
+
+        const bgMap = {
+            info: '#2563eb',
+            success: '#16a34a',
+            error: '#dc2626',
+            warning: '#d97706'
+        };
+        item.style.backgroundColor = bgMap[type] || bgMap.info;
+        item.textContent = message;
+
+        container.appendChild(item);
+
+        // フェードイン
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => {
+                item.style.opacity = '1';
+                item.style.transform = 'translateY(0)';
+            });
+        } else {
+            item.style.opacity = '1';
+        }
+
+        // 自動フェードアウト
+        setTimeout(() => {
+            item.style.opacity = '0';
+            item.style.transform = 'translateY(10px)';
+            setTimeout(() => {
+                if (item.parentNode) item.parentNode.removeChild(item);
+            }, 300);
+        }, duration);
+    }
+    toast.success = (msg, opt) => toast(msg, Object.assign({}, opt, { type: 'success' }));
+    toast.error = (msg, opt) => toast(msg, Object.assign({}, opt, { type: 'error' }));
+    toast.warning = (msg, opt) => toast(msg, Object.assign({}, opt, { type: 'warning' }));
+
+    /**
+     * 指定した要素内にアラートメッセージを表示する (jhtml.alert)
+     */
+    function alert(target, message, options = {}) {
+        const el = $(target);
+        if (!el) return;
+        const isError = options.isError || options.type === 'error';
+        const timeout = options.timeout !== undefined ? options.timeout : 5000;
+
+        el.textContent = message;
+        if (isError) {
+            el.classList.remove('alert-success');
+            el.classList.add('alert-error');
+        } else {
+            el.classList.remove('alert-error');
+            el.classList.add('alert-success');
+        }
+        el.style.display = 'block';
+
+        if (timeout > 0) {
+            if (el._alertTimer) clearTimeout(el._alertTimer);
+            el._alertTimer = setTimeout(() => {
+                el.style.display = 'none';
+            }, timeout);
+        }
+    }
+
+    /**
+     * localStorage / sessionStorage ラッパー (JSON自動化)
+     */
+    function createStorageWrapper(isSession) {
+        return {
+            get: function (key, defaultValue = null) {
+                if (typeof window === 'undefined') return defaultValue;
+                try {
+                    const st = isSession ? window.sessionStorage : window.localStorage;
+                    const val = st.getItem(key);
+                    return val !== null ? JSON.parse(val) : defaultValue;
+                } catch (e) {
+                    return defaultValue;
+                }
+            },
+            set: function (key, value) {
+                if (typeof window === 'undefined') return;
+                try {
+                    const st = isSession ? window.sessionStorage : window.localStorage;
+                    st.setItem(key, JSON.stringify(value));
+                } catch (e) {}
+            },
+            remove: function (key) {
+                if (typeof window === 'undefined') return;
+                try {
+                    const st = isSession ? window.sessionStorage : window.localStorage;
+                    st.removeItem(key);
+                } catch (e) {}
+            },
+            clear: function () {
+                if (typeof window === 'undefined') return;
+                try {
+                    const st = isSession ? window.sessionStorage : window.localStorage;
+                    st.clear();
+                } catch (e) {}
+            }
+        };
+    }
+
+    const storage = createStorageWrapper(false);
+    storage.session = createStorageWrapper(true);
+
     // 公開API
     const jhtml = {
         escapeHtml,
@@ -671,6 +889,11 @@
         removeClass,
         toggleClass,
         state,
+        format,
+        poll,
+        toast,
+        alert,
+        storage,
         analysis$braces,
         analysisJHtml
     };
