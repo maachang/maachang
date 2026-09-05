@@ -247,6 +247,12 @@ if (fs.existsSync(templateClaudeMd)) {
     fs.writeFileSync(path.join(targetDir, '.claude', 'CLAUDE.md'), projectClaudeMd);
 }
 
+// 12. public/jhtml.browser.js (フロントエンド用ランタイムを自動同梱)
+const frameworkBrowserJs = path.join(frameworkDir, 'public', 'jhtml.browser.js');
+if (fs.existsSync(frameworkBrowserJs)) {
+    fs.copyFileSync(frameworkBrowserJs, path.join(targetDir, 'public', 'jhtml.browser.js'));
+}
+
 console.log(`✅ プロジェクト '${projectName}' の作成が完了しました！\n`);
 console.log(`起動方法:`);
 console.log(`  cd ${projectName}`);

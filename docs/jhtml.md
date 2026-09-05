@@ -125,14 +125,45 @@ ${$include("./parts/footer.html")}
 maachang では、クライアントサイド（ブラウザ側）でも jhtml の構文や安全な HTML 生成を行える軽量ランタイム `jhtml.browser.js` を提供しています。
 外部依存なし（Pure JS、数KB）で動作します。
 
-### 読み込み方法
+### 利用方法・配置方針
 
-```html
-<script src="/jhtml.browser.js"></script>
+maachang では、プロジェクトが単体で自己完結し、本番環境へのデプロイやオフライン実行時にも安全に動作することを最重視しています。そのため、**プロジェクト内に静的ファイルとして配置する運用（方法A）を公式推奨**とし、フレームワーク側からの暗黙的なフォールバック配信（方法B）は非推奨としています。
+
+#### 【推奨】方法A: プロジェクト内に配置して読み込む（自己完結型）
+プロジェクト単体でアセットを完結させ、デプロイ先での依存崩れを防ぎます。
+- **新規プロジェクトの場合**: `mkmc <プロジェクト名>` で作成すると、`public/jhtml.browser.js` が**自動的に同梱**されます。
+- **既存プロジェクト（または sdServer 等）の場合**: maachang の `public/jhtml.browser.js` をプロジェクトの `public/`（または `public/js/`）にコピーして配置します。
+
+```bash
+# プロジェクトルートで配置
+cp ${MAACHANG_HOME}/public/jhtml.browser.js ./public/
+# または js ディレクトリ配下へ配置
+# cp ${MAACHANG_HOME}/public/jhtml.browser.js ./public/js/
 ```
 
-### 1. タグ付きテンプレートリテラル (`jhtml.html` / `jhtml.raw`)
-JavaScript 内で安全・手軽に HTML を構築できます。式の内容は自動的に HTML エスケープされます。
+HTML / JHTML 側で読み込みます：
+```html
+<!-- public/ 直下に置いた場合 -->
+<script src="/jhtml.browser.js"></script>
+
+<!-- public/js/ 配下に置いた場合 -->
+<!-- <script src="/js/jhtml.browser.js"></script> -->
+```
+
+#### 【非推奨】方法B: フレームワーク共有アセットからの暗黙的読み込み
+フレームワーク本体側のファイルを暗黙的に参照する運用は、以下の理由から**非推奨**です。
+- プロジェクト単体で静的配信（Nginx 配備や CDN、他環境への移行など）を行う際にファイル欠落が発生する
+- フレームワーク本体側のバージョンアップに伴い、特定プロジェクトの画面挙動に予期せぬ影響を与えるリスクがある
+- **原則として、プロジェクトの `public/` 配下に必要な静的ファイルをすべて保有する構成（方法A）としてください。**
+
+---
+
+### 機能と使い方
+
+`jhtml.browser.js` は、用途に合わせて **2つの書き方（テンプレートリテラル vs JHTML構文）** を使い分けられます。
+
+#### 1. タグ付きテンプレートリテラル (`jhtml.html` / `jhtml.raw`)
+JavaScript 内でサクッと安全に HTML を組み立てたい場合に最適です。式（`${...}`）は自動的に HTML エスケープされます。手動の `escapeHtml()` の記述や、書き忘れによる XSS を根絶できます。
 
 ```javascript
 const { html, raw } = jhtml;

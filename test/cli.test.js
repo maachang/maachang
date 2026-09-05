@@ -39,6 +39,7 @@ describe('CLI & Multi-project Execution', () => {
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'index.html'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'api', 'hello.mt.js'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'sample.mt.html'))).toBe(true);
+        expect(fs.existsSync(path.join(tmpProjectDir, 'public', 'jhtml.browser.js'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'schema', 'README.md'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, 'validates', 'sample.js'))).toBe(true);
         expect(fs.existsSync(path.join(tmpProjectDir, '.claude', 'CLAUDE.md'))).toBe(true);

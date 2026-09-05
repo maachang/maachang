@@ -188,6 +188,17 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`fileUtil.list(dir, { ext, recursive })`**: 拡張子フィルタ・再帰探索付きファイル一覧。
 - **`fileUtil.safeFileName(origName, allowedExts, prefix)`**: アップロードファイル名の安全な生成（拡張子検証・ユニーク名化）。
 
+### 10. `jhtml.browser.js`（フロントエンド・ブラウザ用 JHTML ランタイム）
+- **役割**: ブラウザ側（クライアントサイド）での動的 DOM 構築やテンプレートレンダリング。外部依存ゼロ（Pure JS）。
+- **配置・読み込み方針**: 
+  - **プロジェクト内に配置する（必須・推奨）**: 各プロジェクトの `public/jhtml.browser.js` に配置し、HTML 側で `<script src="/jhtml.browser.js"></script>` を読み込む（`mkmc` でプロジェクト作成時は自動配置済み）。
+  - フレームワーク本体側からの暗黙的参照（フォールバック）は、デプロイや静的配信時の破損リスクがあるため行わない（非推奨）。
+- **主な機能**:
+  - `jhtml.html`...``: 自動エスケープ（XSS対策）付きタグ付きテンプレートリテラル。
+  - `jhtml.raw(str)`: 生 HTML の混在出力。
+  - `jhtml.render('template-id', data)`: `<script type="text/jhtml">` テンプレートのブラウザ側コンパイル＆実行。
+  - `jhtml.renderTo('target-id', 'template-id', data)`: レンダリング結果を指定要素の innerHTML に直接反映。
+
 ---
 
 # ローカル実行・デプロイ手順
