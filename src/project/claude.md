@@ -201,6 +201,8 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
   - `jhtml.raw(str)`: 生 HTML の混在出力。
   - `jhtml.render('template-id', data)`: `<script type="text/jhtml">` テンプレートのブラウザ側コンパイル＆実行。
   - `jhtml.renderTo('target-id', 'template-id', data)`: レンダリング結果を指定要素の innerHTML に直接反映。
+  - `jhtml.$('id')` / `jhtml.$$('selector')`: 単一・複数 DOM 取得ショートカット。
+  - `jhtml.refs('id1', 'id2', ...)`: 複数要素の一括取得（分割代入で大量の `getElementById` を 1行化）。
 
 ---
 

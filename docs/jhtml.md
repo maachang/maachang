@@ -211,3 +211,24 @@ HTML 側に `<% %>` や `${}` を使ったテンプレートを宣言してお�
   await jhtml.renderTo('userList', 'tpl-user-card', userData);
 </script>
 ```
+
+### 3. DOM 操作ショートカット (`jhtml.$` / `jhtml.$$` / `jhtml.refs`)
+
+`document.getElementById` や `querySelectorAll` の記述量を大幅に削減する極小ヘルパーです。
+
+```javascript
+const { $, $$, refs } = jhtml;
+
+// 単一要素取得 (ID または セレクタ)
+const btn = $('submitBtn');             // getElementById('submitBtn') 優先
+const activeTab = $('.tab-btn.active'); // querySelector('.tab-btn.active')
+
+// 複数要素取得 (Array.from(querySelectorAll))
+const tabButtons = $$('.tab-btn');
+tabButtons.forEach(b => b.classList.remove('active'));
+
+// 複数 ID の一括取得 (オブジェクト分割代入で大量の const 宣言を1行に短縮)
+const { overlay, title, progressBar, alertBox } = refs(
+    'overlay', 'title', 'progressBar', 'alertBox'
+);
+```

@@ -82,4 +82,40 @@ describe('jhtml.browser.js (Browser Runtime)', () => {
             expect(res2).toBe('<p>こんにちは、ゲストさん！</p>');
         });
     });
+
+    describe('3. DOM ショートカット ($, $$, refs)', () => {
+        it('global.document が存在する環境で $, $$, refs が正しく機能すること', () => {
+            const mockElements = {
+                'loginBtn': { id: 'loginBtn', tagName: 'BUTTON' },
+                'userInput': { id: 'userInput', tagName: 'INPUT' }
+            };
+
+            // 簡易 mock document
+            global.document = {
+                getElementById: (id) => mockElements[id] || null,
+                querySelector: (sel) => sel.startsWith('#') ? mockElements[sel.slice(1)] || null : null,
+                querySelectorAll: (sel) => Object.values(mockElements)
+            };
+
+            const { $, $$, refs } = browserJHtml;
+
+            // $ (ID探索 / セレクタ探索)
+            expect($('loginBtn')).toBe(mockElements['loginBtn']);
+            expect($('#userInput')).toBe(mockElements['userInput']);
+            expect($('nonExistent')).toBe(null);
+
+            // $$ (複数取得)
+            const all = $$('button');
+            expect(all.length).toBe(2);
+
+            // refs (一括取得)
+            const { loginBtn, userInput, missing } = refs('loginBtn', 'userInput', 'missing');
+            expect(loginBtn).toBe(mockElements['loginBtn']);
+            expect(userInput).toBe(mockElements['userInput']);
+            expect(missing).toBe(null);
+
+            delete global.document;
+        });
+    });
 });
+

@@ -326,6 +326,50 @@
         return htmlStr;
     }
 
+    /**
+     * 指定したIDまたはセレクタのDOM要素を取得する ($)
+     * @param {string|HTMLElement} idOrSelector 要素IDまたはセレクタ文字列
+     * @returns {HTMLElement|null}
+     */
+    function $(idOrSelector) {
+        if (!idOrSelector || typeof idOrSelector !== 'string') return idOrSelector || null;
+        if (typeof document === 'undefined') return null;
+        // 先頭がセレクタ文字 (#, ., [, :, >) でなければ getElementById を優先探索
+        if (!/^[#\.\[:> ]/.test(idOrSelector)) {
+            const el = document.getElementById(idOrSelector);
+            if (el) return el;
+        }
+        return document.querySelector(idOrSelector);
+    }
+
+    /**
+     * 指定したセレクタに合致するすべてのDOM要素を取得する ($$)
+     * @param {string} selector 
+     * @returns {HTMLElement[]}
+     */
+    function $$(selector) {
+        if (!selector || typeof selector !== 'string' || typeof document === 'undefined') return [];
+        return Array.from(document.querySelectorAll(selector));
+    }
+
+    /**
+     * 複数の要素IDを一括取得し、オブジェクトとして返却する
+     * 例: const { nameInput, submitBtn } = jhtml.refs('nameInput', 'submitBtn');
+     * @param {...string} ids 
+     * @returns {Object.<string, HTMLElement|null>}
+     */
+    function refs(...ids) {
+        const result = {};
+        if (typeof document === 'undefined') return result;
+        for (let i = 0; i < ids.length; i++) {
+            const id = ids[i];
+            if (typeof id === 'string') {
+                result[id] = document.getElementById(id) || document.querySelector(id);
+            }
+        }
+        return result;
+    }
+
     // 公開API
     const jhtml = {
         escapeHtml,
@@ -335,6 +379,9 @@
         compile,
         render,
         renderTo,
+        $,
+        $$,
+        refs,
         analysis$braces,
         analysisJHtml
     };
