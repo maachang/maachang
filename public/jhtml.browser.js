@@ -562,6 +562,93 @@
         }
     };
 
+    /**
+     * 要素の表示・非表示・クラス操作ユーティリティ
+     */
+    function show(target, displayType = 'block') {
+        const els = typeof target === 'string' ? $$(target) : (target ? [target] : []);
+        for (let i = 0; i < els.length; i++) {
+            if (els[i] && els[i].style) els[i].style.display = displayType;
+        }
+    }
+
+    function hide(target) {
+        const els = typeof target === 'string' ? $$(target) : (target ? [target] : []);
+        for (let i = 0; i < els.length; i++) {
+            if (els[i] && els[i].style) els[i].style.display = 'none';
+        }
+    }
+
+    function toggle(target, condition, displayType = 'block') {
+        const isShow = condition !== undefined ? Boolean(condition) : null;
+        const els = typeof target === 'string' ? $$(target) : (target ? [target] : []);
+        for (let i = 0; i < els.length; i++) {
+            const el = els[i];
+            if (!el || !el.style) continue;
+            const visible = isShow !== null ? isShow : el.style.display === 'none';
+            el.style.display = visible ? displayType : 'none';
+        }
+    }
+
+    function addClass(target, ...classNames) {
+        const els = typeof target === 'string' ? $$(target) : (target ? [target] : []);
+        for (let i = 0; i < els.length; i++) {
+            if (els[i] && els[i].classList) els[i].classList.add(...classNames);
+        }
+    }
+
+    function removeClass(target, ...classNames) {
+        const els = typeof target === 'string' ? $$(target) : (target ? [target] : []);
+        for (let i = 0; i < els.length; i++) {
+            if (els[i] && els[i].classList) els[i].classList.remove(...classNames);
+        }
+    }
+
+    function toggleClass(target, className, condition) {
+        const els = typeof target === 'string' ? $$(target) : (target ? [target] : []);
+        for (let i = 0; i < els.length; i++) {
+            if (els[i] && els[i].classList) els[i].classList.toggle(className, condition);
+        }
+    }
+
+    /**
+     * 簡易リアクティブ状態オブジェクトを作成する
+     * オブジェクトのプロパティ変更時にコールバックが自動実行される
+     * @param {Object} initialState 初期状態
+     * @param {Function} [onChange] 変更時リスナー (prop, val, oldVal) => void
+     * @returns {Proxy}
+     */
+    function state(initialState = {}, onChange) {
+        const listeners = [];
+        if (typeof onChange === 'function') listeners.push(onChange);
+
+        const proxy = new Proxy(Object.assign({}, initialState), {
+            set(target, prop, value) {
+                const oldVal = target[prop];
+                if (oldVal === value) return true;
+                target[prop] = value;
+                for (let i = 0; i < listeners.length; i++) {
+                    listeners[i](prop, value, oldVal, target);
+                }
+                return true;
+            }
+        });
+
+        // 監視コールバック追加メソッド
+        Object.defineProperty(proxy, '$watch', {
+            enumerable: false,
+            value: (fn) => {
+                if (typeof fn === 'function') listeners.push(fn);
+                return () => {
+                    const idx = listeners.indexOf(fn);
+                    if (idx !== -1) listeners.splice(idx, 1);
+                };
+            }
+        });
+
+        return proxy;
+    }
+
     // 公開API
     const jhtml = {
         escapeHtml,
@@ -577,6 +664,13 @@
         on,
         api,
         form,
+        show,
+        hide,
+        toggle,
+        addClass,
+        removeClass,
+        toggleClass,
+        state,
         analysis$braces,
         analysisJHtml
     };

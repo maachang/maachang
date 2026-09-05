@@ -321,5 +321,75 @@ describe('jhtml.browser.js (Browser Runtime)', () => {
             expect(inputs.enabled.checked).toBe(true);
         });
     });
+
+    describe('7. 表示・クラス操作 (show, hide, toggle, addClass, removeClass)', () => {
+        it('show / hide / toggle で style.display が適切に切り替わること', () => {
+            const mockEl = { style: { display: 'none' } };
+            browserJHtml.show(mockEl, 'flex');
+            expect(mockEl.style.display).toBe('flex');
+
+            browserJHtml.hide(mockEl);
+            expect(mockEl.style.display).toBe('none');
+
+            browserJHtml.toggle(mockEl, true);
+            expect(mockEl.style.display).toBe('block');
+
+            browserJHtml.toggle(mockEl, false);
+            expect(mockEl.style.display).toBe('none');
+        });
+
+        it('addClass / removeClass / toggleClass で classList が操作されること', () => {
+            const classes = new Set();
+            const mockEl = {
+                classList: {
+                    add: (...c) => c.forEach(x => classes.add(x)),
+                    remove: (...c) => c.forEach(x => classes.delete(x)),
+                    toggle: (c, cond) => cond ? classes.add(c) : classes.delete(c)
+                }
+            };
+
+            browserJHtml.addClass(mockEl, 'active', 'highlight');
+            expect(classes.has('active')).toBe(true);
+            expect(classes.has('highlight')).toBe(true);
+
+            browserJHtml.removeClass(mockEl, 'highlight');
+            expect(classes.has('highlight')).toBe(false);
+
+            browserJHtml.toggleClass(mockEl, 'open', true);
+            expect(classes.has('open')).toBe(true);
+        });
+    });
+
+    describe('8. 簡易リアクティブ状態 (jhtml.state)', () => {
+        it('プロパティ変更時にリスナーが発火すること', () => {
+            let changeHistory = [];
+            const app = browserJHtml.state({ count: 0, title: 'initial' }, (prop, val, oldVal) => {
+                changeHistory.push({ prop, val, oldVal });
+            });
+
+            app.count = 1;
+            app.title = 'updated';
+            app.count = 1; // 同値は発火しない
+
+            expect(changeHistory.length).toBe(2);
+            expect(changeHistory[0]).toEqual({ prop: 'count', val: 1, oldVal: 0 });
+            expect(changeHistory[1]).toEqual({ prop: 'title', val: 'updated', oldVal: 'initial' });
+        });
+
+        it('$watch で個別にリスナーを追加・解除できること', () => {
+            const app = browserJHtml.state({ score: 100 });
+            let watchCalls = 0;
+            const unwatch = app.$watch((prop, val) => {
+                if (prop === 'score') watchCalls++;
+            });
+
+            app.score = 90;
+            expect(watchCalls).toBe(1);
+
+            unwatch();
+            app.score = 80;
+            expect(watchCalls).toBe(1); // 解除後は発火しない
+        });
+    });
 });
 

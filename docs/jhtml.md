@@ -294,3 +294,40 @@ await api.post('/api/settings', formData);
 const settings = await api.get('/api/settings');
 form.fill('#settingsForm', settings);
 ```
+
+### 7. 表示・スタイル制御 (`show` / `hide` / `toggle` / `addClass` / `removeClass`)
+
+`el.style.display` や `classList` 操作の直感的なショートカットです。セレクタ文字列または DOM 要素を渡せます。
+
+```javascript
+const { show, hide, toggle, addClass, removeClass } = jhtml;
+
+// 表示 / 非表示
+show('#loadingOverlay');         // display = 'block'
+show('#loadingOverlay', 'flex'); // display = 'flex'
+hide('#loadingOverlay');         // display = 'none'
+
+// 条件付き表示 (真偽値で切り替え)
+toggle('#deleteModal', isModalOpen);
+
+// クラス操作 (複数クラス一括対応)
+addClass('.tab-btn', 'active');
+removeClass('.tab-btn', 'active');
+```
+
+### 8. 簡易リアクティブ状態 (`jhtml.state`)
+
+Proxy を利用した極小（数十行）のリアクティブオブジェクトです。プロパティを書き換えるだけで、画面描画を自動更新できます。
+
+```javascript
+const { state, renderTo, api } = jhtml;
+
+// 状態オブジェクトを作成 (プロパティ変更時にコールバック実行)
+const app = state({ models: [], activeId: '' }, async (prop, val) => {
+    // 状態が変化したら該当エリアを自動再描画
+    await renderTo('modelList', 'tpl-model-card', { models: app.models, activeId: app.activeId });
+});
+
+// データを代入するだけで、画面が自動再描画される
+app.models = await api.get('/api/models');
+```

@@ -206,6 +206,8 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
   - `jhtml.on(target, event, [selector], handler)`: 直接イベント登録および動的要素向けのイベント委任。
   - `jhtml.api`: 自動 JSON パース、Content-Type 付与、ローディング要素連動付き軽量 fetch クライアント (`api.get`, `api.post`, `api.put`, `api.del`)。
   - `jhtml.form(container)` / `jhtml.form.fill(container, data)`: フォーム入力値のオブジェクト一括取得および一括流し込み。
+  - `jhtml.show` / `jhtml.hide` / `jhtml.toggle` / `jhtml.addClass` / `jhtml.removeClass`: 表示制御およびクラス操作糖衣構文。
+  - `jhtml.state(init, onChange)`: プロパティ更新で画面が連動する極小リアクティブ状態オブジェクト。
 
 ---
 
