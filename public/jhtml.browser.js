@@ -495,6 +495,73 @@
         delete: (url, options = {}) => apiRequest(url, Object.assign({}, options, { method: 'DELETE' }))
     };
 
+    /**
+     * フォーム・コンテナ要素内の入力要素から値を取得してオブジェクト化する
+     * name属性、または id属性をキーとして抽出
+     * @param {string|HTMLElement} container フォーム要素、またはコンテナ要素
+     * @returns {Object.<string, *>}
+     */
+    function form(container) {
+        const el = $(container);
+        const data = {};
+        if (!el || typeof el.querySelectorAll !== 'function') return data;
+
+        const inputs = el.querySelectorAll('input, select, textarea');
+        for (let i = 0; i < inputs.length; i++) {
+            const input = inputs[i];
+            const key = input.name || input.id;
+            if (!key || input.disabled) continue;
+
+            const type = (input.type || '').toLowerCase();
+            if (type === 'checkbox') {
+                data[key] = input.checked;
+            } else if (type === 'radio') {
+                if (input.checked) {
+                    data[key] = input.value;
+                } else if (data[key] === undefined) {
+                    data[key] = null;
+                }
+            } else if (type === 'number') {
+                data[key] = input.value === '' ? null : Number(input.value);
+            } else {
+                data[key] = input.value;
+            }
+        }
+        return data;
+    }
+
+    /**
+     * オブジェクトのデータをフォーム・コンテナ内の各入力要素へ一括流し込みする
+     * @param {string|HTMLElement} container フォーム要素、またはコンテナ要素
+     * @param {Object} data 設定するデータオブジェクト
+     */
+    form.fill = function (container, data) {
+        const el = $(container);
+        if (!el || !data || typeof data !== 'object') return;
+
+        for (const [key, val] of Object.entries(data)) {
+            // [name="key"] または #key を探索
+            const input = el.querySelector(`[name="${key}"], #${key}`);
+            if (!input) continue;
+
+            const type = (input.type || '').toLowerCase();
+            if (type === 'checkbox') {
+                input.checked = Boolean(val);
+            } else if (type === 'radio') {
+                const radio = el.querySelector(`input[type="radio"][name="${key}"][value="${val}"]`);
+                if (radio) radio.checked = true;
+            } else {
+                input.value = val === undefined || val === null ? '' : val;
+            }
+
+            // change イベントをディスパッチ (連動処理用)
+            if (typeof Event === 'function') {
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    };
+
     // 公開API
     const jhtml = {
         escapeHtml,
@@ -509,6 +576,7 @@
         refs,
         on,
         api,
+        form,
         analysis$braces,
         analysisJHtml
     };

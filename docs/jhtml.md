@@ -274,3 +274,23 @@ await api.post('/api/generate', promptData, { loading: '#loadingOverlay' });
 await api.put('/api/config', newConfig);
 await api.del('/api/models/sd-v1-5');
 ```
+
+### 6. フォーム入出力ユーティリティ (`jhtml.form` / `jhtml.form.fill`)
+
+設定画面や入力フォームの値を 1 行でオブジェクト化したり、API から取得したデータをフォームへ一括流し込みできます。
+
+```javascript
+const { form, api } = jhtml;
+
+// 1. フォームの入力値を一括取得（input/select/textarea をオブジェクト化）
+// name 属性、または id 属性をキーとして抽出 (checkbox は boolean, number は数値化)
+const formData = form('#settingsForm');
+// => { endpoint: 'http://localhost:8080', apiKey: 'secret', enableLlm: true }
+
+// そのまま API 送信
+await api.post('/api/settings', formData);
+
+// 2. オブジェクトデータをフォームの各入力欄へ一括反映 (fill)
+const settings = await api.get('/api/settings');
+form.fill('#settingsForm', settings);
+```

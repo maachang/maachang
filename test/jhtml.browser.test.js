@@ -275,5 +275,51 @@ describe('jhtml.browser.js (Browser Runtime)', () => {
             global.fetch = originalFetch;
         });
     });
+
+    describe('6. フォーム入出力 (jhtml.form & jhtml.form.fill)', () => {
+        it('form() で入力要素からオブジェクトを抽出できること', () => {
+            const mockInputs = [
+                { name: 'endpoint', value: 'http://localhost:8080', type: 'text', disabled: false },
+                { id: 'apiKey', value: 'secret-123', type: 'password', disabled: false },
+                { name: 'enabled', checked: true, type: 'checkbox', disabled: false },
+                { name: 'count', value: '42', type: 'number', disabled: false },
+                { name: 'ignored', value: 'skip', type: 'text', disabled: true }
+            ];
+
+            const mockForm = {
+                querySelectorAll: (sel) => mockInputs
+            };
+
+            const data = browserJHtml.form(mockForm);
+            expect(data.endpoint).toBe('http://localhost:8080');
+            expect(data.apiKey).toBe('secret-123');
+            expect(data.enabled).toBe(true);
+            expect(data.count).toBe(42);
+            expect(data.ignored).toBe(undefined);
+        });
+
+        it('form.fill() でオブジェクトデータを各入力要素に設定できること', () => {
+            const inputs = {
+                endpoint: { name: 'endpoint', value: '', dispatchEvent: () => {} },
+                enabled: { name: 'enabled', type: 'checkbox', checked: false, dispatchEvent: () => {} }
+            };
+
+            const mockForm = {
+                querySelector: (sel) => {
+                    if (sel.includes('endpoint')) return inputs.endpoint;
+                    if (sel.includes('enabled')) return inputs.enabled;
+                    return null;
+                }
+            };
+
+            browserJHtml.form.fill(mockForm, {
+                endpoint: 'http://new-url',
+                enabled: true
+            });
+
+            expect(inputs.endpoint.value).toBe('http://new-url');
+            expect(inputs.enabled.checked).toBe(true);
+        });
+    });
 });
 
