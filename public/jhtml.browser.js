@@ -370,6 +370,131 @@
         return result;
     }
 
+    /**
+     * イベントリスナーを登録する（イベント委任対応）
+     * 
+     * 形式1（直接バインド）:
+     *   jhtml.on('#btn', 'click', (e) => { ... });
+     *   jhtml.on(buttonEl, 'click', (e) => { ... });
+     *   jhtml.on('.items', 'click', (e) => { ... }); // 複数要素に一括登録
+     * 
+     * 形式2（イベント委任・動的要素対応）:
+     *   // #container 配下の .btn-del がクリックされた時に発火
+     *   jhtml.on('#container', 'click', '.btn-del', (e, target) => { ... });
+     * 
+     * @param {string|HTMLElement|Window|Document} target 対象要素、セレクタ文字列、または親要素
+     * @param {string} eventName イベント名 (例: 'click', 'submit', 'input')
+     * @param {string|Function} selectorOrHandler セレクタ文字列（委任時）またはイベントハンドラ
+     * @param {Function} [handler] イベントハンドラ (委任時: (event, matchedTarget) => void)
+     */
+    function on(target, eventName, selectorOrHandler, handler) {
+        if (typeof document === 'undefined') return;
+
+        const isDelegation = typeof selectorOrHandler === 'string' && typeof handler === 'function';
+        const actualSelector = isDelegation ? selectorOrHandler : null;
+        const actualHandler = isDelegation ? handler : selectorOrHandler;
+
+        if (typeof actualHandler !== 'function') {
+            throw new TypeError('[jhtml] on: handler must be a function');
+        }
+
+        // 対象要素の解決
+        let elements = [];
+        if (typeof target === 'string') {
+            elements = $$(target);
+            if (elements.length === 0) {
+                // セレクタに合致しない場合、IDとして試行
+                const single = $(target);
+                if (single) elements = [single];
+            }
+        } else if (target && typeof target.addEventListener === 'function') {
+            elements = [target];
+        } else if (Array.isArray(target) || (target && typeof target.length === 'number')) {
+            elements = Array.from(target);
+        }
+
+        for (let i = 0; i < elements.length; i++) {
+            const el = elements[i];
+            if (!el || typeof el.addEventListener !== 'function') continue;
+
+            if (isDelegation) {
+                // イベント委任: 親要素で捕捉し、クリックされた要素またはその祖先でセレクタ判定
+                el.addEventListener(eventName, function (e) {
+                    const match = e.target && typeof e.target.closest === 'function'
+                        ? e.target.closest(actualSelector)
+                        : null;
+                    if (match && el.contains(match)) {
+                        actualHandler.call(match, e, match);
+                    }
+                });
+            } else {
+                // 直接バインド
+                el.addEventListener(eventName, actualHandler);
+            }
+        }
+    }
+
+    /**
+     * 軽量 API クライアント (fetch ラッパー)
+     * JSON リクエスト/レスポンス、ローディング表示連動、エラーハンドリングを標準提供
+     */
+    async function apiRequest(url, options = {}) {
+        const method = (options.method || 'GET').toUpperCase();
+        const headers = Object.assign({
+            'Accept': 'application/json'
+        }, options.headers || {});
+
+        let body = options.body;
+        if (body !== undefined && body !== null && typeof body === 'object' && !(body instanceof FormData) && !(body instanceof Blob)) {
+            headers['Content-Type'] = 'application/json; charset=utf-8';
+            body = JSON.stringify(body);
+        }
+
+        // ローディング要素の連動（指定されている場合、表示/非表示を自動制御）
+        const loadingEl = options.loading ? $(options.loading) : null;
+        if (loadingEl) {
+            loadingEl.style.display = options.loadingDisplay || 'flex';
+        }
+
+        try {
+            const fetchFn = typeof fetch !== 'undefined' ? fetch : (global.fetch || null);
+            if (!fetchFn) throw new Error('[jhtml.api] fetch API is not available');
+
+            const res = await fetchFn(url, Object.assign({}, options, { method, headers, body }));
+            const contentType = res.headers.get('content-type') || '';
+            let data = null;
+
+            if (contentType.includes('application/json')) {
+                data = await res.json();
+            } else {
+                data = await res.text();
+            }
+
+            if (!res.ok) {
+                const err = new Error(data && data.error ? data.error : `HTTP ${res.status} ${res.statusText}`);
+                err.status = res.status;
+                err.response = res;
+                err.data = data;
+                throw err;
+            }
+
+            return data;
+        } finally {
+            if (loadingEl) {
+                loadingEl.style.display = 'none';
+            }
+        }
+    }
+
+    const api = {
+        request: apiRequest,
+        get: (url, options = {}) => apiRequest(url, Object.assign({}, options, { method: 'GET' })),
+        post: (url, body, options = {}) => apiRequest(url, Object.assign({}, options, { method: 'POST', body })),
+        put: (url, body, options = {}) => apiRequest(url, Object.assign({}, options, { method: 'PUT', body })),
+        del: (url, options = {}) => apiRequest(url, Object.assign({}, options, { method: 'DELETE' })),
+        delete: (url, options = {}) => apiRequest(url, Object.assign({}, options, { method: 'DELETE' }))
+    };
+
     // 公開API
     const jhtml = {
         escapeHtml,
@@ -382,6 +507,8 @@
         $,
         $$,
         refs,
+        on,
+        api,
         analysis$braces,
         analysisJHtml
     };

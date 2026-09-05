@@ -203,6 +203,8 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
   - `jhtml.renderTo('target-id', 'template-id', data)`: レンダリング結果を指定要素の innerHTML に直接反映。
   - `jhtml.$('id')` / `jhtml.$$('selector')`: 単一・複数 DOM 取得ショートカット。
   - `jhtml.refs('id1', 'id2', ...)`: 複数要素の一括取得（分割代入で大量の `getElementById` を 1行化）。
+  - `jhtml.on(target, event, [selector], handler)`: 直接イベント登録および動的要素向けのイベント委任。
+  - `jhtml.api`: 自動 JSON パース、Content-Type 付与、ローディング要素連動付き軽量 fetch クライアント (`api.get`, `api.post`, `api.put`, `api.del`)。
 
 ---
 

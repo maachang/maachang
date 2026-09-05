@@ -2,7 +2,7 @@
  * jhtml.browser.js の単体テスト
  */
 
-const { describe, it, expect } = require('bun:test');
+const { describe, it, expect, beforeAll, afterAll } = require('bun:test');
 const browserJHtml = require('../public/jhtml.browser.js');
 
 describe('jhtml.browser.js (Browser Runtime)', () => {
@@ -115,6 +115,164 @@ describe('jhtml.browser.js (Browser Runtime)', () => {
             expect(missing).toBe(null);
 
             delete global.document;
+        });
+    });
+
+    describe('4. イベントリスナー・イベント委任 (jhtml.on)', () => {
+        beforeAll(() => {
+            global.document = {
+                getElementById: () => null,
+                querySelector: () => null,
+                querySelectorAll: () => []
+            };
+        });
+
+        afterAll(() => {
+            delete global.document;
+        });
+
+        it('直接要素またはセレクタへのイベントリスナー登録が動作すること', () => {
+            let clicked = false;
+            const mockBtn = {
+                addEventListener: (event, handler) => {
+                    if (event === 'click') handler({ type: 'click' });
+                }
+            };
+
+            browserJHtml.on(mockBtn, 'click', () => {
+                clicked = true;
+            });
+
+            expect(clicked).toBe(true);
+        });
+
+        it('イベント委任 (delegation) が正しく動作すること', () => {
+            let delegatedTarget = null;
+            let containerListener = null;
+
+            const mockChild = {
+                tagName: 'BUTTON',
+                className: 'btn-item',
+                closest: (sel) => sel === '.btn-item' ? mockChild : null
+            };
+
+            const mockContainer = {
+                id: 'container',
+                contains: (node) => node === mockChild,
+                addEventListener: (event, handler) => {
+                    if (event === 'click') containerListener = handler;
+                }
+            };
+
+            browserJHtml.on(mockContainer, 'click', '.btn-item', (e, target) => {
+                delegatedTarget = target;
+            });
+
+            // 親要素でイベント発火（子がクリックされたことを模倣）
+            expect(typeof containerListener).toBe('function');
+            containerListener({
+                type: 'click',
+                target: mockChild
+            });
+
+            expect(delegatedTarget).toBe(mockChild);
+        });
+    });
+
+    describe('5. API クライアント (jhtml.api)', () => {
+        it('jhtml.api.get で JSON レスポンスが取得できること', async () => {
+            const originalFetch = global.fetch;
+            global.fetch = async (url, opts) => {
+                expect(url).toBe('/api/models');
+                expect(opts.method).toBe('GET');
+                return {
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({ success: true, models: [{ id: 'v1' }] })
+                };
+            };
+
+            const data = await browserJHtml.api.get('/api/models');
+            expect(data.success).toBe(true);
+            expect(data.models[0].id).toBe('v1');
+
+            global.fetch = originalFetch;
+        });
+
+        it('jhtml.api.post で body が自動 JSON 化され送信されること', async () => {
+            const originalFetch = global.fetch;
+            global.fetch = async (url, opts) => {
+                expect(url).toBe('/api/switch');
+                expect(opts.method).toBe('POST');
+                expect(opts.headers['Content-Type']).toContain('application/json');
+                expect(opts.body).toBe('{"modelId":"sd-1"}');
+                return {
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({ success: true })
+                };
+            };
+
+            const data = await browserJHtml.api.post('/api/switch', { modelId: 'sd-1' });
+            expect(data.success).toBe(true);
+
+            global.fetch = originalFetch;
+        });
+
+        it('ローディング要素の連動 (loading option) が動作すること', async () => {
+            const originalFetch = global.fetch;
+            const mockOverlay = { style: { display: 'none' } };
+
+            global.document = {
+                getElementById: (id) => id === 'overlay' ? mockOverlay : null,
+                querySelector: () => null,
+                querySelectorAll: () => []
+            };
+
+            global.fetch = async () => {
+                // fetch 中は表示されていること
+                expect(mockOverlay.style.display).toBe('flex');
+                return {
+                    ok: true,
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({ ok: true })
+                };
+            };
+
+            await browserJHtml.api.get('/api/test', { loading: 'overlay' });
+            // 完了後は none に戻ること
+            expect(mockOverlay.style.display).toBe('none');
+
+            global.fetch = originalFetch;
+            delete global.document;
+        });
+
+        it('HTTP エラー時に例外がスローされステータスが含まれること', async () => {
+            const originalFetch = global.fetch;
+            global.fetch = async () => {
+                return {
+                    ok: false,
+                    status: 404,
+                    statusText: 'Not Found',
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({ error: 'Model not found' })
+                };
+            };
+
+            let errCaught = null;
+            try {
+                await browserJHtml.api.get('/api/invalid');
+            } catch (err) {
+                errCaught = err;
+            }
+
+            expect(errCaught).not.toBe(null);
+            expect(errCaught.message).toBe('Model not found');
+            expect(errCaught.status).toBe(404);
+
+            global.fetch = originalFetch;
         });
     });
 });

@@ -232,3 +232,45 @@ const { overlay, title, progressBar, alertBox } = refs(
     'overlay', 'title', 'progressBar', 'alertBox'
 );
 ```
+
+### 4. イベントリスナー & イベント委任 (`jhtml.on`)
+
+直接要素への登録に加え、`innerHTML` による動的追加・再描画後もイベントが途切れない **イベント委任（Event Delegation）** をサポートしています。
+
+```javascript
+const { on } = jhtml;
+
+// 直接バインド (セレクタ指定で複数要素も一度に登録可能)
+on('.tab-btn', 'click', (e) => {
+    // タブ切り替え処理
+});
+
+// 【強力】イベント委任 (動的に生成される要素に最適)
+// #modelList 配下の .btn-select がクリックされた時に発火
+on('#modelList', 'click', '.btn-select', (e, target) => {
+    console.log('選択されたID:', target.dataset.id);
+});
+```
+
+### 5. 軽量 API 通信クライアント (`jhtml.api`)
+
+ブラウザ標準の `fetch` をラップし、JSON シリアライズ/デシリアライズ、エラー判定、ローディングオーバーレイの表示制御を 1 行で完結させます。
+
+```javascript
+const { api } = jhtml;
+
+// 1. GET リクエスト (自動 JSON パース)
+const res = await api.get('/api/models');
+console.log(res.models);
+
+// 2. POST リクエスト (オブジェクトを自動 JSON 化 & Content-Type 付与)
+await api.post('/api/models', { modelId: 'sd-v1-5' });
+
+// 3. ローディング要素との自動連動
+// 通信開始時に #loadingOverlay を表示し、完了時に自動で非表示化
+await api.post('/api/generate', promptData, { loading: '#loadingOverlay' });
+
+// 4. その他の HTTP メソッド
+await api.put('/api/config', newConfig);
+await api.del('/api/models/sd-v1-5');
+```
