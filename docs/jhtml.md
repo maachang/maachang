@@ -117,3 +117,71 @@ ${$include("./parts/footer.html")}
 - **ルートパス**: `/parts/header`（`public/` ディレクトリ基準）
 - **拡張子省略**: `${$include("./parts/header")}`（`.mt.html`、`.jhtml.js`、`.html`、`.htm` を自動解決）
 - **静的 HTML**: `footer.html` などのプレーンな HTML ファイルもそのまま直接埋め込み可能
+
+---
+
+## フロントエンド（ブラウザ側）ランタイム (`jhtml.browser.js`)
+
+maachang では、クライアントサイド（ブラウザ側）でも jhtml の構文や安全な HTML 生成を行える軽量ランタイム `jhtml.browser.js` を提供しています。
+外部依存なし（Pure JS、数KB）で動作します。
+
+### 読み込み方法
+
+```html
+<script src="/jhtml.browser.js"></script>
+```
+
+### 1. タグ付きテンプレートリテラル (`jhtml.html` / `jhtml.raw`)
+JavaScript 内で安全・手軽に HTML を構築できます。式の内容は自動的に HTML エスケープされます。
+
+```javascript
+const { html, raw } = jhtml;
+
+// 自動エスケープ（XSS対策）
+const userContent = '<script>alert(1)</script>';
+const title = 'お知らせ';
+const cardHtml = html`
+  <div class="card">
+    <h3>${title}</h3>
+    <p>${userContent}</p>
+    ${raw('<span class="badge">Safe HTML</span>')}
+  </div>
+`;
+
+// 配列展開も自動連結
+const listHtml = html`
+  <ul>
+    ${items.map(item => html`<li>${item.name}</li>`)}
+  </ul>
+`;
+```
+
+### 2. JHTML テンプレート構文 (<script type="text/jhtml">)
+HTML 側に `<% %>` や `${}` を使ったテンプレートを宣言しておき、データだけを渡してレンダリングします。
+
+```html
+<!-- HTML 側 -->
+<script type="text/jhtml" id="tpl-user-card">
+  <div class="user-card <%= isActive ? 'active' : '' %>">
+    <h4>${name}</h4>
+    <% if (bio) { %>
+      <p class="bio">${bio}</p>
+    <% } %>
+  </div>
+</script>
+
+<div id="userList"></div>
+
+<!-- JavaScript 側 -->
+<script>
+  // DOM の ID を指定してレンダリング
+  const htmlStr = await jhtml.render('tpl-user-card', {
+    name: 'Taro',
+    bio: 'よろしくお願いします',
+    isActive: true
+  });
+
+  // または renderTo で要素へ直接挿入
+  await jhtml.renderTo('userList', 'tpl-user-card', userData);
+</script>
+```
