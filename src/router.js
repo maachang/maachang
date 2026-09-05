@@ -406,10 +406,18 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
             return await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack);
         }
     } else {
-        // C. 静的ファイル配信
+        // C. 静的ファイル配信 (プロジェクト側優先、なければフレームワーク側を探索)
         const staticFilePath = path.join(publicDir, targetRelPath);
         if (fs.existsSync(staticFilePath) && fs.statSync(staticFilePath).isFile()) {
             return serveStatic(staticFilePath, req, baseDir, frameworkDir);
+        }
+
+        // フレームワーク本体の public 配下をフォールバック探索 (例: /jhtml.browser.js など)
+        if (frameworkDir) {
+            const frameworkStaticFile = path.join(frameworkDir, 'public', targetRelPath);
+            if (fs.existsSync(frameworkStaticFile) && fs.statSync(frameworkStaticFile).isFile()) {
+                return serveStatic(frameworkStaticFile, req, baseDir, frameworkDir);
+            }
         }
     }
 

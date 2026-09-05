@@ -132,4 +132,14 @@ describe('Server & Router Integration', () => {
         const data = await res.json();
         expect(data.error).toBe('custom blocked');
     });
+
+    it('プロジェクト側にない静的アセット (/jhtml.browser.js) がフレームワーク本体側からフォールバック配信されること', async () => {
+        const req = new Request('http://localhost:3000/jhtml.browser.js');
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type')).toContain('application/javascript');
+        const text = await res.text();
+        expect(text).toContain('jhtml.browser.js');
+        expect(text).toContain('escapeHtml');
+    });
 });
