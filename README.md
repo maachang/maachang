@@ -38,7 +38,10 @@ maachang はあえてこれらと距離を置き、**「PHP のようにディ�
    - `bun:sqlite` を利用した軽量 SQLite3 セッション管理モジュール（`modules/session.js`）を標準搭載。
 4. **日別ローテーションロガー**:
    - 日別ファイル出力（`./log/logout.YYYY-MM-DD.log`）と標準出力を兼ね備えたロガー（`modules/logger.js`）を内蔵。
-5. **プロジェクト単位の実行 ＆ 本番事前コンパイル**:
+5. **リッチエラーハンドリング（開発時コードハイライト / 本番時隠蔽）**:
+   - 開発時はエラー発生行および前後コードをハイライトした HTML 画面やスタックトレース付き JSON を返却。
+   - 本番時（`--prod`）は内部構造を隠蔽した安全な 500 応答を返しつつ、日別ログファイルへ完全なエラー詳細を記録（詳細は [docs/error-handling.md](docs/error-handling.md) 参照）。
+6. **プロジェクト単位の実行 ＆ 本番事前コンパイル**:
    - `mkmc` コマンドで独立したプロジェクト雛形をどこにでも即座に生成。
    - ローカル開発時は `.mt.html` / `.jhtml` をオンデマンド変換して即時確認。
    - 本番環境では `mcbuild` コマンドで事前コンパイル（`.jhtml.js`）して最速実行。
@@ -355,7 +358,7 @@ const safeName = fileUtil.safeFileName('avatar.PNG', ['png', 'jpg'], 'user_');
 ```
 
 ### 10. 組み込みオブジェクト
-- `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `getHeader()`, `getQuery()`, `getCookie()`
+- `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `ips` (全ホップ配列), `protocol` (http/https), `isSecure` (真偽値), `host`, `baseUrl` (Nginxリバースプロキシヘッダー自動考慮), `getHeader()`, `getQuery()`, `getCookie()`
 - `$response` / `$response()`: `status(code)`, `contentType(type, charset)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `redirect(url)`
 - `$loadConf(name)`: `conf/{name}.local.json` または `conf/{name}.json` をロード（`//` や `/* ... */` などの **JS コメント** および末尾カンマに対応）
 - `$loadLib(name)`: `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` からモジュールをロード

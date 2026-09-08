@@ -232,20 +232,30 @@ function parseCookies(cookieHeader) {
 }
 
 /**
+ * クライアントのIPアドレス一覧を取得 (Nginx等のリバースプロキシを考慮)
+ * @param {Request} req 
+ * @param {Object} headers 
+ * @returns {string[]}
+ */
+function getClientIps(req, headers) {
+    if (headers['x-forwarded-for']) {
+        return headers['x-forwarded-for'].split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (headers['x-real-ip']) {
+        return [headers['x-real-ip'].trim()];
+    }
+    return ['127.0.0.1'];
+}
+
+/**
  * クライアントのIPアドレスを取得 (Nginx等のリバースプロキシを考慮)
  * @param {Request} req 
  * @param {Object} headers 
  * @returns {string}
  */
 function getClientIp(req, headers) {
-    if (headers['x-forwarded-for']) {
-        const list = headers['x-forwarded-for'].split(',');
-        return list[0].trim();
-    }
-    if (headers['x-real-ip']) {
-        return headers['x-real-ip'].trim();
-    }
-    return '127.0.0.1';
+    const ips = getClientIps(req, headers);
+    return ips[0] || '127.0.0.1';
 }
 
 /**
@@ -273,7 +283,18 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
     }
 
     const cookies = parseCookies(headers['cookie']);
-    const clientIp = getClientIp(req, headers);
+    const clientIps = getClientIps(req, headers);
+    const clientIp = clientIps[0] || '127.0.0.1';
+
+    // プロトコル判定 (Nginx X-Forwarded-Proto を考慮)
+    const protocol = (headers['x-forwarded-proto'] || url.protocol.replace(':', '') || 'http').toLowerCase();
+    const isSecure = protocol === 'https';
+
+    // ホスト判定 (Nginx X-Forwarded-Host, Host ヘッダーを考慮)
+    const host = headers['x-forwarded-host'] || headers['host'] || url.host;
+
+    // ベースURL組み立て (例: https://example.com)
+    const baseUrl = `${protocol}://${host}`;
 
     // $request 実体オブジェクト
     const requestTarget = {
@@ -286,6 +307,11 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         body,
         cookies,
         ip: clientIp,
+        ips: clientIps,
+        protocol,
+        isSecure,
+        host,
+        baseUrl,
         // ヘルパーメソッド
         getHeader: (k) => headers[k.toLowerCase()],
         getQuery: (k, def = null) => (query[k] !== undefined ? query[k] : def),
@@ -549,6 +575,7 @@ module.exports = {
     createContext,
     parseCookies,
     getClientIp,
+    getClientIps,
     loadEnv,
     stripJsonComments,
     parseJson

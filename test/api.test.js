@@ -42,6 +42,25 @@ describe('Web API (.mt.js) & $request / $response Compatibility', () => {
                 return $response.status(200).json({ user: user });
             };
         `);
+
+        // 4. プロキシヘッダー検証用 API
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'api', 'proxy_info.mt.js'), `
+            exports.handler = async function() {
+                return {
+                    ip: $request.ip,
+                    ips: $request.ips,
+                    protocol: $request.protocol,
+                    isSecure: $request.isSecure,
+                    host: $request.host,
+                    baseUrl: $request.baseUrl,
+                    fnProtocol: $request().protocol,
+                    fnIsSecure: $request().isSecure,
+                    fnHost: $request().host,
+                    fnBaseUrl: $request().baseUrl,
+                    fnIps: $request().ips
+                };
+            };
+        `);
     });
 
     afterAll(() => {
@@ -76,5 +95,46 @@ describe('Web API (.mt.js) & $request / $response Compatibility', () => {
         expect(res.status).toBe(200);
         const data = await res.json();
         expect(data.user).toBe('Antigravity');
+    });
+
+    it('Nginx プロキシヘッダー (X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-For) を正しく認識・反映すること', async () => {
+        const req = new Request('http://127.0.0.1:3000/api/proxy_info', {
+            headers: {
+                'X-Forwarded-Proto': 'https',
+                'X-Forwarded-Host': 'example.com',
+                'X-Forwarded-For': '203.0.113.195, 70.41.3.18, 150.70.0.1'
+            }
+        });
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.status).toBe(200);
+        const data = await res.json();
+
+        expect(data.ip).toBe('203.0.113.195');
+        expect(data.ips).toEqual(['203.0.113.195', '70.41.3.18', '150.70.0.1']);
+        expect(data.protocol).toBe('https');
+        expect(data.isSecure).toBe(true);
+        expect(data.host).toBe('example.com');
+        expect(data.baseUrl).toBe('https://example.com');
+
+        // $request() 関数呼び出し記法でも同一の値が得られること
+        expect(data.fnProtocol).toBe('https');
+        expect(data.fnIsSecure).toBe(true);
+        expect(data.fnHost).toBe('example.com');
+        expect(data.fnBaseUrl).toBe('https://example.com');
+        expect(data.fnIps).toEqual(['203.0.113.195', '70.41.3.18', '150.70.0.1']);
+    });
+
+    it('プロキシヘッダーがない場合はリクエストURLから通常の値が取得できること', async () => {
+        const req = new Request('http://localhost:3000/api/proxy_info');
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.status).toBe(200);
+        const data = await res.json();
+
+        expect(data.ip).toBe('127.0.0.1');
+        expect(data.ips).toEqual(['127.0.0.1']);
+        expect(data.protocol).toBe('http');
+        expect(data.isSecure).toBe(false);
+        expect(data.host).toBe('localhost:3000');
+        expect(data.baseUrl).toBe('http://localhost:3000');
     });
 });
