@@ -391,3 +391,54 @@ const settings = storage.get('settings', { theme: 'light' }); // デフォルト
 // sessionStorage (タブ内の一時状態)
 storage.session.set('active_tab', 'local');
 ```
+
+### 13. モーダル・ダイアログ制御 (`jhtml.modal`)
+
+管理画面やフォーム入力で頻出するモーダルダイアログの開閉、背景オーバーレイクリックや ESC キーでの自動クローズを制御します。
+
+```javascript
+const { modal } = jhtml;
+
+// モーダルコントローラーの作成
+const editModal = modal('#userModal', {
+    closeSelector: '.btn-close, [data-close]', // 閉じるトリガー (デフォルト対応)
+    closeOnEsc: true,                          // ESC キーで閉じる (デフォルト: true)
+    closeOnBackdrop: true,                     // 背景クリックで閉じる (デフォルト: true)
+    onOpen: (el) => console.log('Opened'),
+    onClose: (el) => console.log('Closed')
+});
+
+editModal.open();   // 表示
+editModal.close();  // 非表示
+editModal.toggle(); // トグル
+editModal.isOpen(); // 開閉判定
+
+// ワンライナーによる直接オープン
+modal.open('#detailModal');
+modal.close('#detailModal');
+```
+
+### 14. URL クエリパラメータ操作 (`jhtml.query`)
+
+検索フォームやページネーションにおいて、画面遷移なしで URL クエリを同期・読み書きします（履歴を汚さない `replaceState` に標準対応）。
+
+```javascript
+const { query } = jhtml;
+
+// 1. パラメータの取得 (デフォルト値対応)
+const page = query.get('page', 1);
+const keyword = query.get('q');
+
+// 2. 全パラメータのオブジェクト取得
+const params = query.all(); // { page: "1", q: "search word" }
+
+// 3. パラメータの更新 (null / undefined / 空文字 で自動削除)
+query.set('page', 2);
+query.set({ keyword: '新検索語', page: 1, filter: null });
+
+// 4. 履歴に追加する場合 (ブラウザの戻るボタンで戻れるようにする)
+query.set({ page: 3 }, { push: true });
+
+// 5. パラメータの削除
+query.remove('keyword');
+```

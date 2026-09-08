@@ -457,6 +457,116 @@ describe('jhtml.browser.js (Browser Runtime)', () => {
 
             delete global.window;
         });
+
+        it('modal で開閉、クラス付与、ESCキー連携、コールバックが動作すること', () => {
+            let keydownHandler = null;
+            const mockEl = {
+                id: 'testModal',
+                style: { display: 'none' },
+                classList: {
+                    add: (c) => mockEl._classes.add(c),
+                    remove: (c) => mockEl._classes.delete(c)
+                },
+                _classes: new Set(),
+                addEventListener: (evt, fn) => {
+                    mockEl._listeners[evt] = fn;
+                },
+                _listeners: {}
+            };
+
+            global.document = {
+                getElementById: (id) => id === 'testModal' ? mockEl : null,
+                querySelector: () => mockEl
+            };
+            global.window = {
+                addEventListener: (evt, fn) => {
+                    if (evt === 'keydown') keydownHandler = fn;
+                },
+                removeEventListener: (evt, fn) => {
+                    if (evt === 'keydown') keydownHandler = null;
+                }
+            };
+
+            let opened = false;
+            let closed = false;
+
+            const m = browserJHtml.modal(mockEl, {
+                onOpen: () => { opened = true; },
+                onClose: () => { closed = true; }
+            });
+
+            expect(m.isOpen()).toBe(false);
+
+            // 開く
+            m.open();
+            expect(m.isOpen()).toBe(true);
+            expect(mockEl.style.display).toBe('block');
+            expect(mockEl._classes.has('active')).toBe(true);
+            expect(opened).toBe(true);
+            expect(keydownHandler).not.toBeNull();
+
+            // ESC キー押下で閉じる
+            keydownHandler({ key: 'Escape' });
+            expect(m.isOpen()).toBe(false);
+            expect(mockEl.style.display).toBe('none');
+            expect(mockEl._classes.has('active')).toBe(false);
+            expect(closed).toBe(true);
+            expect(keydownHandler).toBeNull();
+
+            // トグル
+            m.toggle();
+            expect(m.isOpen()).toBe(true);
+            m.toggle();
+            expect(m.isOpen()).toBe(false);
+
+            delete global.document;
+            delete global.window;
+        });
+
+        it('query で URLSearchParams の取得・設定・削除・一括処理ができること', () => {
+            let currentSearch = '?keyword=test&page=1';
+            global.window = {
+                location: {
+                    pathname: '/search',
+                    get search() { return currentSearch; },
+                    hash: ''
+                },
+                history: {
+                    replaceState: (state, title, url) => {
+                        const qPos = url.indexOf('?');
+                        currentSearch = qPos >= 0 ? url.substring(qPos) : '';
+                    },
+                    pushState: (state, title, url) => {
+                        const qPos = url.indexOf('?');
+                        currentSearch = qPos >= 0 ? url.substring(qPos) : '';
+                    }
+                }
+            };
+
+            const { query } = browserJHtml;
+
+            // 1. 個別取得
+            expect(query.get('keyword')).toBe('test');
+            expect(query.get('page')).toBe('1');
+            expect(query.get('sort', 'asc')).toBe('asc');
+
+            // 2. 全取得
+            expect(query.all()).toEqual({ keyword: 'test', page: '1' });
+
+            // 3. 設定 (単一)
+            query.set('page', 2);
+            expect(query.get('page')).toBe('2');
+
+            // 4. 設定 (一括オブジェクト & 削除)
+            query.set({ sort: 'desc', page: 3, keyword: null });
+            expect(query.all()).toEqual({ page: '3', sort: 'desc' });
+
+            // 5. 削除
+            query.remove('sort');
+            expect(query.all()).toEqual({ page: '3' });
+
+            delete global.window;
+        });
     });
 });
 

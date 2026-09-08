@@ -867,6 +867,189 @@
     const storage = createStorageWrapper(false);
     storage.session = createStorageWrapper(true);
 
+    /**
+     * モーダル・ダイアログ制御 (jhtml.modal)
+     */
+    function createModal(target, options = {}) {
+        const el = $(target);
+        if (!el) return null;
+
+        const closeSelector = options.closeSelector || '.modal-close, [data-close]';
+        const closeOnEsc = options.closeOnEsc !== undefined ? options.closeOnEsc : true;
+        const closeOnBackdrop = options.closeOnBackdrop !== undefined ? options.closeOnBackdrop : true;
+        const activeClass = options.activeClass || 'active';
+        const displayType = options.display || 'block';
+
+        let isOpen = false;
+        let escHandler = null;
+
+        function open() {
+            if (isOpen) return;
+            isOpen = true;
+            el.classList.add(activeClass);
+            el.style.display = displayType;
+
+            if (closeOnEsc && typeof window !== 'undefined') {
+                escHandler = (e) => {
+                    if (e.key === 'Escape' || e.keyCode === 27) {
+                        close();
+                    }
+                };
+                window.addEventListener('keydown', escHandler);
+            }
+
+            if (typeof options.onOpen === 'function') {
+                options.onOpen(el);
+            }
+        }
+
+        function close() {
+            if (!isOpen) return;
+            isOpen = false;
+            el.classList.remove(activeClass);
+            el.style.display = 'none';
+
+            if (escHandler && typeof window !== 'undefined') {
+                window.removeEventListener('keydown', escHandler);
+                escHandler = null;
+            }
+
+            if (typeof options.onClose === 'function') {
+                options.onClose(el);
+            }
+        }
+
+        function toggle(force) {
+            const next = force !== undefined ? force : !isOpen;
+            if (next) open();
+            else close();
+        }
+
+        // 閉じるボタンと背景クリックの初期化 (初回のみ)
+        if (!el._modalInitialized) {
+            el._modalInitialized = true;
+            if (el.addEventListener) {
+                el.addEventListener('click', (e) => {
+                    // 背景クリック判定
+                    if (closeOnBackdrop && e.target === el) {
+                        close();
+                        return;
+                    }
+                    // 閉じるボタン判定
+                    if (closeSelector && e.target && e.target.closest && e.target.closest(closeSelector)) {
+                        close();
+                    }
+                });
+            }
+        }
+
+        return {
+            element: el,
+            open,
+            close,
+            toggle,
+            isOpen: () => isOpen
+        };
+    }
+
+    const modal = function (target, options) {
+        return createModal(target, options);
+    };
+    modal.open = function (target, options) {
+        const m = createModal(target, options);
+        if (m) m.open();
+        return m;
+    };
+    modal.close = function (target) {
+        const el = $(target);
+        if (!el) return;
+        el.classList.remove('active');
+        el.style.display = 'none';
+    };
+
+    /**
+     * URL クエリパラメータ操作 (jhtml.query)
+     */
+    const query = {
+        get: function (key, defaultValue = null) {
+            if (typeof window === 'undefined' || !window.location) return defaultValue;
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const val = params.get(key);
+                return val !== null ? val : defaultValue;
+            } catch (e) {
+                return defaultValue;
+            }
+        },
+        all: function () {
+            const result = {};
+            if (typeof window === 'undefined' || !window.location) return result;
+            try {
+                const params = new URLSearchParams(window.location.search);
+                for (const [k, v] of params.entries()) {
+                    result[k] = v;
+                }
+            } catch (e) {}
+            return result;
+        },
+        set: function (keyOrObj, valueOrOptions, options = {}) {
+            if (typeof window === 'undefined' || !window.location) return;
+            try {
+                const params = new URLSearchParams(window.location.search);
+                let opts = options;
+
+                if (typeof keyOrObj === 'object' && keyOrObj !== null) {
+                    opts = valueOrOptions || {};
+                    for (const [k, v] of Object.entries(keyOrObj)) {
+                        if (v === null || v === undefined || v === '') {
+                            params.delete(k);
+                        } else {
+                            params.set(k, String(v));
+                        }
+                    }
+                } else if (typeof keyOrObj === 'string') {
+                    if (valueOrOptions === null || valueOrOptions === undefined || valueOrOptions === '') {
+                        params.delete(keyOrObj);
+                    } else {
+                        params.set(keyOrObj, String(valueOrOptions));
+                    }
+                }
+
+                const newSearch = params.toString();
+                const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
+
+                if (window.history) {
+                    if (opts.push) {
+                        window.history.pushState(null, '', newUrl);
+                    } else {
+                        window.history.replaceState(null, '', newUrl);
+                    }
+                }
+                return newUrl;
+            } catch (e) {
+                return null;
+            }
+        },
+        remove: function (...keys) {
+            if (typeof window === 'undefined' || !window.location) return;
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const flatKeys = keys.flat();
+                for (const k of flatKeys) {
+                    params.delete(k);
+                }
+                const newSearch = params.toString();
+                const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
+                if (window.history) {
+                    window.history.replaceState(null, '', newUrl);
+                }
+                return newUrl;
+            } catch (e) {
+                return null;
+            }
+        }
+    };
+
     // 公開API
     const jhtml = {
         escapeHtml,
@@ -894,6 +1077,8 @@
         toast,
         alert,
         storage,
+        modal,
+        query,
         analysis$braces,
         analysisJHtml
     };

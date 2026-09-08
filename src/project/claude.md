@@ -41,7 +41,7 @@
 - **実装状況と設計案の峻別**: 「現状のコードで既に実装されていること」と「改修すれば実現可能な設計上のアイデア」を絶対に混同して回答しない。未実装の機能をあたかも利用可能であるかのように説明してはならない。
 - **エラー発生時の責任転嫁・安易な回答の禁止**: 動作不良やエラーが発生した際、コードの実態（未実装・考慮漏れ）を確認せずに安易に「〇〇をコピーしてください」「〇〇を再設定してください」などユーザー側の運用に責任を押し付ける回答をしない。まずフレームワークやサーバーコード側の実装状態を正確に検証し、何が足りていないのか（コード改修が必要なのか、運用操作が必要なのか）を客観的・正確に説明すること。
 - **フロントエンド DOM 操作 & 画面スクリプトにおける `jhtml.browser.js` の利用義務**:
-  HTML 内で動的 DOM 操作、イベント登録、API 通信、フォーム入出力、要素表示制御、進捗監視（ポーリング等）を行うクライアントサイドスクリプトを作成・改修する際は、生の `document.getElementById` や生 `fetch`、インライン `onclick`、独自 `escapeHtml` などをベタ書きせず、必ず `<script src="/jhtml.browser.js"></script>` を読み込み、`jhtml.html`, `jhtml.$`, `jhtml.refs`, `jhtml.on`, `jhtml.api`, `jhtml.form`, `jhtml.show/hide`, `jhtml.poll` などの提供ユーティリティを利用すること。
+  HTML 内で動的 DOM 操作、イベント登録、API 通信、フォーム入出力、要素表示制御、進捗監視（ポーリング等）、モーダル制御、URL クエリ操作を行うクライアントサイドスクリプトを作成・改修する際は、生の `document.getElementById` や生 `fetch`、インライン `onclick`、独自 `escapeHtml` などをベタ書きせず、必ず `<script src="/jhtml.browser.js"></script>` を読み込み、`jhtml.html`, `jhtml.$`, `jhtml.refs`, `jhtml.on`, `jhtml.api`, `jhtml.form`, `jhtml.show/hide`, `jhtml.poll`, `jhtml.modal`, `jhtml.query` などの提供ユーティリティを利用すること。
 - **リファクタリング・共通化・全対応における網羅性の徹底（中途半端な対応・モグラ叩きの禁止）**:
   「全体を統一」「他にはあるか」「全部対応して」等の指示を受けた際、指摘された特定箇所や特定ファイルのみを局所的に修正して完了とみなすことは厳禁。必ず以下のフローを遵守すること:
   1. **着手時の全体検索**: 作業前に必ずプロジェクト全体（`public/`, `lib/` 等）に対して `grep` 検索等を実施し、対象ファイル・行・件数を網羅的に洗い出し、リスト化してから作業に着手する。
@@ -219,6 +219,8 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
   - `jhtml.poll(fn, opts)`: プログレス監視・完了判定付き定期ポーリング。
   - `jhtml.toast` / `jhtml.alert`: トースト通知およびアラート要素への自動消去メッセージ注入。
   - `jhtml.storage`: JSON 自動シリアライズ対応 localStorage / sessionStorage ラッパー。
+  - `jhtml.modal`: モーダルダイアログ制御（開閉、ESCキー・背景クリック自動クローズ連動）。
+  - `jhtml.query`: URL クエリパラメータ操作（`get`, `all`, `set`, `remove`, 履歴連動）。
 
 ---
 

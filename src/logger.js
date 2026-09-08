@@ -107,6 +107,10 @@ function getWriteStream(dateOnly) {
 
     const logFilePath = path.join(_logDir, `${_logFilePrefix}.${dateOnly}.log`);
     _currentWriteStream = fs.createWriteStream(logFilePath, { flags: 'a', encoding: 'utf-8' });
+    _currentWriteStream.on('error', (err) => {
+        _currentWriteStream = null;
+        _currentDateStr = null;
+    });
     _currentDateStr = dateOnly;
 
     return _currentWriteStream;
