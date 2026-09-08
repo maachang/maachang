@@ -12,13 +12,59 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const projectName = process.argv[2];
+const frameworkDir = process.env.MAACHANG_HOME || path.resolve(__dirname, '..');
 
-if (!projectName) {
-    console.error('使用方法: mkmc <プロジェクト名>');
-    process.exit(1);
+function getVersion() {
+    try {
+        const pkgPath = path.join(frameworkDir, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+            return pkg.version || '1.0.0';
+        }
+    } catch (e) {}
+    return '1.0.0';
 }
 
+function showHelp() {
+    console.log(`
+mkmc - 新規 maachang プロジェクト作成 CLI
+
+使用方法:
+  mkmc <プロジェクト名> [オプション]
+
+オプション:
+  -v, --version    バージョン情報を表示
+  -h, --help       このヘルプメッセージを表示
+
+生成される標準構成:
+  conf/          設定 JSON (server.json, session.json, env.json)
+  public/        Web コンテンツ・API (.mt.js)・JHTML テンプレート (.mt.html)
+  lib/           プロジェクト固有のモジュール
+  schema/        データベーススキーマ定義 (DDL)
+  validates/     入力検証バリデーション定義
+  data/          SQLite3 データベースファイル格納先
+  .claude/       AI 開発用ルール (CLAUDE.md)
+
+使用例:
+  mkmc my-web-app
+  cd my-web-app
+  maachang
+`);
+}
+
+const firstArg = process.argv[2];
+
+if (!firstArg || firstArg === '-h' || firstArg === '--help') {
+    showHelp();
+    process.exit(firstArg ? 0 : 1);
+}
+
+if (firstArg === '-v' || firstArg === '--version') {
+    console.log(`mkmc (maachang) v${getVersion()}`);
+    process.exit(0);
+}
+
+const projectName = firstArg;
 const targetDir = path.resolve(process.cwd(), projectName);
 
 if (fs.existsSync(targetDir)) {
@@ -304,7 +350,6 @@ module.exports = {
 `);
 
 // 11. .claude/CLAUDE.md
-const frameworkDir = process.env.MAACHANG_HOME || path.resolve(__dirname, '..');
 const templateClaudeMd = path.join(frameworkDir, 'src', 'project', 'claude.md');
 if (fs.existsSync(templateClaudeMd)) {
     const rawTemplate = fs.readFileSync(templateClaudeMd, 'utf-8');

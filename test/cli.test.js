@@ -190,4 +190,42 @@ exports.handler = async function() {
         expect(data.customTimeout).toBe(5000);
         expect(data.customHosts).toEqual(['localhost', '127.0.0.1']);
     });
+
+    it('maachang, mkmc, mcbuild でバージョン (-v / --version) およびヘルプ (--help) が表示されること', async () => {
+        // 1. maachang -v & --help
+        const mcVer = Bun.spawnSync(['bun', path.join(frameworkDir, 'src', 'index.js'), '-v']);
+        expect(mcVer.exitCode).toBe(0);
+        expect(mcVer.stdout.toString()).toContain('maachang v1.0.0');
+
+        const mcHelp = Bun.spawnSync(['bun', path.join(frameworkDir, 'src', 'index.js'), '--help']);
+        expect(mcHelp.exitCode).toBe(0);
+        expect(mcHelp.stdout.toString()).toContain('使用方法:');
+        expect(mcHelp.stdout.toString()).toContain('--prod');
+
+        // 2. mkmc -v & --help
+        const mkmcVer = Bun.spawnSync(['bun', path.join(frameworkDir, 'bin', 'mkmc.js'), '--version'], {
+            env: { ...process.env, MAACHANG_HOME: frameworkDir }
+        });
+        expect(mkmcVer.exitCode).toBe(0);
+        expect(mkmcVer.stdout.toString()).toContain('mkmc (maachang) v1.0.0');
+
+        const mkmcHelp = Bun.spawnSync(['bun', path.join(frameworkDir, 'bin', 'mkmc.js'), '--help'], {
+            env: { ...process.env, MAACHANG_HOME: frameworkDir }
+        });
+        expect(mkmcHelp.exitCode).toBe(0);
+        expect(mkmcHelp.stdout.toString()).toContain('mkmc - 新規 maachang プロジェクト作成 CLI');
+
+        // 3. mcbuild -v & --help
+        const mcbuildVer = Bun.spawnSync(['bun', path.join(frameworkDir, 'bin', 'mcbuild.js'), '-v'], {
+            env: { ...process.env, MAACHANG_HOME: frameworkDir }
+        });
+        expect(mcbuildVer.exitCode).toBe(0);
+        expect(mcbuildVer.stdout.toString()).toContain('mcbuild (maachang) v1.0.0');
+
+        const mcbuildHelp = Bun.spawnSync(['bun', path.join(frameworkDir, 'bin', 'mcbuild.js'), '--help'], {
+            env: { ...process.env, MAACHANG_HOME: frameworkDir }
+        });
+        expect(mcbuildHelp.exitCode).toBe(0);
+        expect(mcbuildHelp.stdout.toString()).toContain('mcbuild - 本番デプロイ用 JHTML テンプレート事前コンパイラ');
+    });
 });

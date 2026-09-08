@@ -15,6 +15,50 @@ const path = require('node:path');
 const frameworkDir = process.env.MAACHANG_HOME || path.resolve(__dirname, '..');
 const { compileToJs } = require(path.join(frameworkDir, 'src', 'jhtml.js'));
 
+function getVersion() {
+    try {
+        const pkgPath = path.join(frameworkDir, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+            return pkg.version || '1.0.0';
+        }
+    } catch (e) {}
+    return '1.0.0';
+}
+
+function showHelp() {
+    console.log(`
+mcbuild - 本番デプロイ用 JHTML テンプレート事前コンパイラ
+
+使用方法:
+  mcbuild [オプション]
+
+説明:
+  プロジェクト内の public/ 配下にある *.mt.html および *.jhtml テンプレートを
+  再帰的に探索し、本番最速実行用の *.jhtml.js へ一括コンパイルします。
+
+オプション:
+  -v, --version    バージョン情報を表示
+  -h, --help       このヘルプメッセージを表示
+
+使用例:
+  cd my-app
+  mcbuild
+  maachang --prod
+`);
+}
+
+const args = process.argv.slice(2);
+for (const arg of args) {
+    if (arg === '-v' || arg === '--version') {
+        console.log(`mcbuild (maachang) v${getVersion()}`);
+        process.exit(0);
+    } else if (arg === '-h' || arg === '--help') {
+        showHelp();
+        process.exit(0);
+    }
+}
+
 const projectDir = process.cwd();
 const publicDir = path.join(projectDir, 'public');
 

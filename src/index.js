@@ -52,6 +52,47 @@ function initLogger(baseDir) {
 }
 
 /**
+ * パッケージバージョンを取得
+ * @returns {string}
+ */
+function getVersion() {
+    try {
+        const pkgPath = path.resolve(__dirname, '..', 'package.json');
+        if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+            return pkg.version || '1.0.0';
+        }
+    } catch (e) {}
+    return '1.0.0';
+}
+
+/**
+ * ヘルプメッセージを表示
+ */
+function showHelp() {
+    console.log(`
+maachang - オンプレミス向け Bun 超最小 Web アプリケーションサーバー
+
+使用方法:
+  maachang [オプション]
+
+オプション:
+  -p, --port <port>       リスニングポート番号を指定 (デフォルト: 3000, conf/server.json 優先)
+  -h, --host <hostname>   バインドホスト名を指定 (デフォルト: 0.0.0.0)
+  -d, --dir <path>        プロジェクトルートディレクトリを指定 (デフォルト: カレントディレクトリ)
+  --prod, --production    本番モードで起動 (JHTML 事前コンパイル必須、エラー詳細を隠蔽)
+  -v, --version           バージョン情報を表示
+  --help                  このヘルプメッセージを表示
+
+使用例:
+  maachang
+  maachang -p 8080
+  maachang --prod
+  maachang -d /var/www/my-app -p 3000
+`);
+}
+
+/**
  * コマンドライン引数をパース
  * @param {string[]} args 
  * @returns {Object}
@@ -66,7 +107,13 @@ function parseArgs(args) {
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
-        if (arg === '-p' || arg === '--port') {
+        if (arg === '-v' || arg === '--version') {
+            console.log(`maachang v${getVersion()}`);
+            process.exit(0);
+        } else if (arg === '--help') {
+            showHelp();
+            process.exit(0);
+        } else if (arg === '-p' || arg === '--port') {
             options.port = parseInt(args[++i], 10);
         } else if (arg === '-h' || arg === '--host' || arg === '--hostname') {
             options.hostname = args[++i];
