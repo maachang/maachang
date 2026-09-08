@@ -74,25 +74,68 @@ fs.writeFileSync(path.join(targetDir, 'public', 'index.html'), `<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${projectName} - maachang</title>
+    <script src="/jhtml.browser.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 40px; background: #fafafa; color: #333; }
-        .card { background: white; padding: 24px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 600px; margin: 0 auto; }
-        h1 { margin-top: 0; color: #111; }
-        ul { line-height: 1.8; }
-        a { color: #0066cc; text-decoration: none; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; background: #f8fafc; color: #1e293b; }
+        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); max-width: 680px; margin: 0 auto; }
+        h1 { margin-top: 0; color: #0f172a; font-size: 1.6rem; display: flex; align-items: center; gap: 8px; }
+        .status-badge { background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 9999px; font-size: 0.85rem; font-weight: 600; }
+        .info-box { background: #f1f5f9; border-radius: 8px; padding: 16px; margin: 20px 0; font-family: monospace; font-size: 0.9rem; }
+        .btn { background: #2563eb; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 500; transition: background 0.2s; }
+        .btn:hover { background: #1d4ed8; }
+        .btn-outline { background: transparent; color: #2563eb; border: 1px solid #2563eb; margin-left: 8px; }
+        .btn-outline:hover { background: #eff6ff; }
+        ul { line-height: 2; }
+        a { color: #2563eb; text-decoration: none; }
         a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h1>🚀 ${projectName} サーバーが起動しました</h1>
+        <h1>🚀 ${projectName} <span class="status-badge">起動中</span></h1>
         <p>オンプレミス向け Bun 超最小フレームワーク <strong>maachang</strong> へようこそ！</p>
+        
         <h3>動作確認リンク</h3>
         <ul>
-            <li><a href="/api/hello">/api/hello (.mt.js サンプルAPI)</a></li>
+            <li><a href="/api/hello">/api/hello (.mt.js サンプルAPI - JSON応答)</a></li>
             <li><a href="/sample.jhtml">/sample.jhtml (JHTML テンプレートサンプル)</a></li>
         </ul>
+
+        <h3>フロントエンド連携 (jhtml.browser.js)</h3>
+        <p>画面遷移なしで API とセッションカウントの更新をテストできます：</p>
+        <div>
+            <button id="btnFetch" class="btn">API を呼び出す (jhtml.api)</button>
+            <a href="/sample.jhtml" class="btn btn-outline">テンプレート画面へ</a>
+        </div>
+
+        <div id="resultBox" class="info-box" style="display: none;">
+            <!-- jhtml.html で動的描画 -->
+        </div>
     </div>
+
+    <script>
+        const { $, html, on, api, show, toast } = jhtml;
+
+        on('#btnFetch', 'click', async () => {
+            try {
+                // jhtml.api による簡単JSON取得
+                const data = await api.get('/api/hello', { loading: '#btnFetch' });
+                
+                // jhtml.html による安全な自動エスケープ描画
+                $('#resultBox').innerHTML = html\`
+                    <div><strong>Server Message:</strong> \${data.message}</div>
+                    <div><strong>Client IP:</strong> \${data.clientIp}</div>
+                    <div><strong>Protocol:</strong> \${data.protocol} (isSecure: \${data.isSecure})</div>
+                    <div><strong>Session Count:</strong> <span style="color: #2563eb; font-weight: bold;">\${data.sessionCount}</span> 回目のアクセス</div>
+                    <div><strong>Server Time:</strong> \${data.serverTime}</div>
+                \`;
+                show('#resultBox');
+                toast.success('API から最新データを取得しました');
+            } catch (err) {
+                toast.error('API 呼び出しに失敗しました: ' + err.message);
+            }
+        });
+    </script>
 </body>
 </html>
 `);
@@ -132,6 +175,11 @@ exports.handler = async function() {
         message: "Hello from maachang!",
         serverTime: new Date().toISOString(),
         clientIp: $request.ip,
+        clientIps: $request.ips,
+        protocol: $request.protocol,
+        isSecure: $request.isSecure,
+        host: $request.host,
+        baseUrl: $request.baseUrl,
         sessionCount: session.data.count
     };
 };
@@ -142,26 +190,43 @@ fs.writeFileSync(path.join(targetDir, 'public', 'sample.mt.html'), `<!DOCTYPE ht
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>JHTML Sample</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JHTML Sample - ${projectName}</title>
+    <script src="/jhtml.browser.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 40px; }
-        .box { border: 1px solid #ddd; padding: 16px; border-radius: 4px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; background: #f8fafc; color: #1e293b; }
+        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); max-width: 680px; margin: 0 auto; }
+        .box { border: 1px solid #e2e8f0; background: #f8fafc; padding: 16px; border-radius: 8px; margin: 16px 0; }
+        .tag { background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 4px; font-size: 0.85rem; font-weight: 600; }
+        a { color: #2563eb; text-decoration: none; }
+        a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
-    <h1>JHTML テンプレートサンプル</h1>
-    <div class="box">
-        <% 
-            const now = new Date().toLocaleString('ja-JP');
-            const items = ['りんご', 'みかん', 'バナナ'];
-        %>
-        <p>現在日時: \${now}</p>
-        <h3>アイテム一覧:</h3>
-        <ul>
-            <% for (const item of items) { %>
-                <li><%= item %></li>
-            <% } %>
-        </ul>
+    <div class="card">
+        <p><a href="/">&larr; トップ画面へ戻る</a></p>
+        <h1>JHTML サーバーサイドレンダリング</h1>
+        <p>サーバーサイド（<code>.mt.html</code>）で実行され、HTML として出力されます（本番では <code>mcbuild</code> で事前コンパイル可能）。</p>
+
+        <div class="box">
+            <% 
+                const now = new Date().toLocaleString('ja-JP');
+                const fruits = [
+                    { name: 'りんご', price: 150 },
+                    { name: 'みかん', price: 100 },
+                    { name: 'バナナ', price: 200 }
+                ];
+            %>
+            <p><strong>サーバー実行日時:</strong> \${now}</p>
+            <p><strong>クライアント IP:</strong> \${$request.ip} <span class="tag">\${$request.protocol}</span></p>
+
+            <h3>アイテム一覧 (ループ展開):</h3>
+            <ul>
+                <% for (const item of fruits) { %>
+                    <li><%= item.name %> - <strong><%= item.price %> 円</strong></li>
+                <% } %>
+            </ul>
+        </div>
     </div>
 </body>
 </html>

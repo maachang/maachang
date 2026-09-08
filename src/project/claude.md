@@ -68,7 +68,7 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 
 | ヘルパー | 説明 | 主なメソッド / プロパティ |
 |---|---|---|
-| `$request` / `$request()` | リクエスト情報の取得 | `.path`, `.method`, `.query`, `.body`, `.cookies`, `.ip`<br>`.getHeader(key)`, `.getQuery(key, def)`, `.getCookie(key, def)` |
+| `$request` / `$request()` | リクエスト情報の取得 | `.path`, `.method`, `.query`, `.body`, `.cookies`, `.ip`, `.ips`, `.protocol`, `.isSecure`, `.host`, `.baseUrl`<br>`.getHeader(key)`, `.getQuery(key, def)`, `.getCookie(key, def)` |
 | `$response` / `$response()` | レスポンスの生成・返却 | `.status(code)`, `.contentType(type, charset)`, `.header(key, val)`, `.setCookie(name, val, opt)`, `.deleteCookie(name)`<br>`.json(data, status)`, `.html(str, status)`, `.text(str, status)`, `.redirect(url, status)`, `.body(val)` |
 | `$include(path, params)` | 別テンプレート/HTMLのインクルード | `${$include("./parts/header.mt.html", { title: "..." })}`<br>（`${$include(...)}` は自動で await 補完） |
 | `$params` | インクルードパラメータの参照 | テンプレートやパーツ内で `${$params.title}` や `${$params.user}` としてアクセス |
@@ -232,6 +232,20 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
   - `--prod`: 本番モード起動
 - `mcbuild`: 本番デプロイ用にプロジェクト内の JHTML テンプレートを一括で `.jhtml.js` に事前コンパイル。
 - `bun test`: 単体・結合テストの実行。
+
+---
+
+# エラーハンドリング & 運用・終了仕様
+
+- **開発時リッチエラー表示 (`isDev: true`)**:
+  - ブラウザアクセス時はエラー発生行および前後コードをハイライトしたダークテーマ HTML 画面を表示。
+  - API アクセス時は `file`, `line`, `column`, `stack` を含む詳細 JSON を返却。
+- **本番時エラー隠蔽 (`--prod` / `isDev: false`)**:
+  - 内部ファイルパスやコード行を完全に隠蔽した汎用 500 レスポンスを返却。
+- **エラーログ保全**:
+  - 開発・本番問わず必ず `./log/logout.YYYY-MM-DD.log` および標準出力にスタックトレースを記録。
+- **Graceful Shutdown**:
+  - `SIGINT` (Ctrl+C) および `SIGTERM` (systemd / Docker) 受信時に、処理中リクエストの完了を待機し、すべての SQLite 接続を安全にクローズしてから正常終了。
 
 ---
 
