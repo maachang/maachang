@@ -142,4 +142,30 @@ describe('Server & Router Integration', () => {
         expect(text).toContain('jhtml.browser.js');
         expect(text).toContain('escapeHtml');
     });
+
+    it('startServer と stopServer による Graceful Shutdown が安全に完了すること', async () => {
+        const { startServer, stopServer } = require('../src/index.js');
+        const dbWrapper = require('../src/db.js');
+
+        // テスト用のDB接続を作成
+        const db = dbWrapper.getDb(':memory:');
+        db.exec('CREATE TABLE test_shutdown (id INTEGER PRIMARY KEY);');
+
+        // サーバーを別ポートかつシグナル登録オフで起動
+        const server = startServer({
+            baseDir: testProjectDir,
+            port: 3999,
+            hostname: '127.0.0.1',
+            handleSignals: false
+        });
+
+        expect(server).toBeDefined();
+        expect(server.port).toBe(3999);
+
+        // stopServer で停止
+        await stopServer(server);
+
+        // 二重停止してもエラーにならないこと
+        await stopServer(server);
+    });
 });

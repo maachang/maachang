@@ -119,16 +119,27 @@ function close(dbPath) {
     if (dbPath) {
         const resolvedPath = dbPath === ':memory:' ? ':memory:' : path.resolve(dbPath);
         if (_dbCache.has(resolvedPath)) {
-            const db = _dbCache.get(resolvedPath);
-            db.close();
+            try {
+                const db = _dbCache.get(resolvedPath);
+                db.close();
+            } catch (e) {}
             _dbCache.delete(resolvedPath);
         }
     } else {
         for (const [key, db] of _dbCache.entries()) {
-            db.close();
+            try {
+                db.close();
+            } catch (e) {}
         }
         _dbCache.clear();
     }
+}
+
+/**
+ * すべてのキャッシュされたDB接続を安全に閉じる (Graceful Shutdown用)
+ */
+function closeAll() {
+    close();
 }
 
 module.exports = {
@@ -138,5 +149,6 @@ module.exports = {
     run,
     exec,
     transaction,
-    close
+    close,
+    closeAll
 };

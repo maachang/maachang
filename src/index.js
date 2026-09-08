@@ -15,6 +15,7 @@ const { handleRequest } = require('./router.js');
 const { loadEnv, parseJson } = require('./context.js');
 const { handleServerError } = require('./errorHandler.js');
 const logger = require('./logger.js');
+const dbWrapper = require('./db.js');
 
 /**
  * ログ設定を初期化
@@ -170,7 +171,61 @@ function startServer(customOptions = {}) {
         }
     });
 
+    // Graceful Shutdown ハンドラーの登録 (テスト等で自動終了を無効化したい場合は handleSignals: false を指定可能)
+    if (customOptions.handleSignals !== false) {
+        registerShutdownHandlers(server);
+    }
+
     return server;
+}
+
+let _isShuttingDown = false;
+
+/**
+ * サーバーおよびリソースを安全に停止 (Graceful Shutdown)
+ * @param {import('bun').Server} server 
+ * @param {Object} [options]
+ * @param {boolean} [options.closeDb=true]
+ * @returns {Promise<void>}
+ */
+async function stopServer(server, options = {}) {
+    if (_isShuttingDown) return;
+    _isShuttingDown = true;
+
+    logger.info('🛑 Graceful shutdown initiated. Stopping server...');
+
+    try {
+        if (server && typeof server.stop === 'function') {
+            server.stop(true); // true = 処理中リクエストを完了させてから停止
+        }
+    } catch (e) {
+        logger.error(`Error stopping Bun server: ${e.message}`);
+    }
+
+    if (options.closeDb !== false) {
+        try {
+            dbWrapper.closeAll();
+        } catch (e) {
+            logger.error(`Error closing database connections: ${e.message}`);
+        }
+    }
+
+    logger.info('✅ maachang server stopped cleanly.');
+}
+
+/**
+ * プロセスシグナル (SIGINT, SIGTERM) を監視し Graceful Shutdown を実行
+ * @param {import('bun').Server} server 
+ */
+function registerShutdownHandlers(server) {
+    const onSignal = async (signal) => {
+        logger.info(`Received ${signal}. Starting shutdown process...`);
+        await stopServer(server);
+        process.exit(0);
+    };
+
+    process.once('SIGINT', () => onSignal('SIGINT'));
+    process.once('SIGTERM', () => onSignal('SIGTERM'));
 }
 
 // 直接実行された場合はサーバー起動
@@ -180,6 +235,8 @@ if (import.meta.main || require.main === module) {
 
 module.exports = {
     startServer,
+    stopServer,
+    registerShutdownHandlers,
     parseArgs,
     resolveServerConfig
 };
