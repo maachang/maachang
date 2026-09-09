@@ -61,6 +61,28 @@ describe('Web API (.mt.js) & $request / $response Compatibility', () => {
                 };
             };
         `);
+
+        // 5. $response.download() 検証用 API
+        fs.writeFileSync(path.join(testProjectDir, 'sample.csv'), 'id,name\n1,山田\n');
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'api', 'download_file.mt.js'), `
+            exports.handler = async function() {
+                return $response.download('sample.csv', '顧客データ.csv');
+            };
+        `);
+
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'api', 'download_buffer.mt.js'), `
+            exports.handler = async function() {
+                const buf = Buffer.from('hello binary download');
+                return $response.download(buf, 'report.txt');
+            };
+        `);
+
+        // 6. $response.file() インライン検証用 API
+        fs.writeFileSync(path.join(testProjectDir, 'public', 'api', 'inline_file.mt.js'), `
+            exports.handler = async function() {
+                return $response.file('sample.csv', { filename: 'preview.csv' });
+            };
+        `);
     });
 
     afterAll(() => {
@@ -137,4 +159,38 @@ describe('Web API (.mt.js) & $request / $response Compatibility', () => {
         expect(data.host).toBe('localhost:3000');
         expect(data.baseUrl).toBe('http://localhost:3000');
     });
+
+    it('$response.download() でファイルが適切な MIME / Content-Disposition (RFC 5987 日本語名) でダウンロードできること', async () => {
+        const req = new Request('http://localhost:3000/api/download_file');
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Type')).toContain('text/csv');
+        const disposition = res.headers.get('Content-Disposition');
+        expect(disposition).toContain('attachment;');
+        expect(disposition).toContain('filename=');
+        expect(disposition).toContain("filename*=UTF-8''%E9%A1%A7%E5%AE%A2%E3%83%87%E3%83%BC%E3%82%BF.csv");
+        const body = await res.text();
+        expect(body).toBe('id,name\n1,山田\n');
+    });
+
+    it('$response.download() で Buffer からのバイナリ/テキストダウンロードができること', async () => {
+        const req = new Request('http://localhost:3000/api/download_buffer');
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Type')).toContain('text/plain');
+        expect(res.headers.get('Content-Disposition')).toContain('filename="report.txt"');
+        const body = await res.text();
+        expect(body).toBe('hello binary download');
+    });
+
+    it('$response.file() でインライン表示用ヘッダー (inline) が付与されること', async () => {
+        const req = new Request('http://localhost:3000/api/inline_file');
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Type')).toContain('text/csv');
+        expect(res.headers.get('Content-Disposition')).toContain('inline;');
+        const body = await res.text();
+        expect(body).toBe('id,name\n1,山田\n');
+    });
 });
+

@@ -15,6 +15,45 @@ const dbWrapper = require('./db.js');
 
 // 設定ファイルのキャッシュ
 const _confCache = new Map();
+let _mimeMapCache = null;
+
+/**
+ * 拡張子に対応する MIME タイプを取得
+ * @param {string} ext 拡張子 (.csv, .pdf 等)
+ * @param {string} baseDir 
+ * @param {string} frameworkDir 
+ * @returns {string}
+ */
+function getMimeType(ext, baseDir, frameworkDir) {
+    if (!_mimeMapCache) {
+        let map = {};
+        const projectMime = path.join(baseDir, 'conf', 'mime.json');
+        const frameworkMime = path.join(frameworkDir, 'conf', 'mime.json');
+        if (fs.existsSync(projectMime)) {
+            map = parseJson(fs.readFileSync(projectMime, 'utf-8')) || {};
+        } else if (fs.existsSync(frameworkMime)) {
+            map = parseJson(fs.readFileSync(frameworkMime, 'utf-8')) || {};
+        }
+        _mimeMapCache = {
+            '.html': 'text/html; charset=utf-8',
+            '.htm': 'text/html; charset=utf-8',
+            '.js': 'application/javascript; charset=utf-8',
+            '.json': 'application/json; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.txt': 'text/plain; charset=utf-8',
+            '.pdf': 'application/pdf',
+            '.csv': 'text/csv; charset=utf-8',
+            '.zip': 'application/zip',
+            ...map
+        };
+    }
+    return _mimeMapCache[ext.toLowerCase()] || 'application/octet-stream';
+}
 
 /**
  * JSON文字列からJavaScriptコメント (// および /* ... * /) を安全に除去し、末尾カンマも処理する
@@ -425,6 +464,65 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
             _responseBody = '';
             _isHandled = true;
             return _responseBody;
+        },
+        download: function (pathOrBuffer, downloadFileName, opts = {}) {
+            let data;
+            let filename = downloadFileName;
+
+            if (typeof pathOrBuffer === 'string') {
+                const resolvedPath = path.isAbsolute(pathOrBuffer) ? pathOrBuffer : path.resolve(baseDir, pathOrBuffer);
+                if (!fs.existsSync(resolvedPath)) {
+                    throw new Error(`[download] File not found: ${resolvedPath}`);
+                }
+                data = fs.readFileSync(resolvedPath);
+                if (!filename) {
+                    filename = path.basename(resolvedPath);
+                }
+            } else if (Buffer.isBuffer(pathOrBuffer) || pathOrBuffer instanceof Uint8Array) {
+                data = pathOrBuffer;
+                if (!filename) {
+                    filename = 'download.bin';
+                }
+            } else if (typeof pathOrBuffer === 'object' && pathOrBuffer !== null) {
+                data = JSON.stringify(pathOrBuffer, null, 2);
+                if (!filename) filename = 'download.json';
+            } else {
+                data = String(pathOrBuffer);
+                if (!filename) filename = 'download.txt';
+            }
+
+            const ext = path.extname(filename).toLowerCase();
+            const contentType = opts.contentType || getMimeType(ext, baseDir, fwDir);
+            _responseHeaders.set('Content-Type', contentType);
+
+            // RFC 5987 に準拠した日本語ファイル名ヘッダー構築
+            const encodedName = encodeURIComponent(filename);
+            const asciiName = filename.replace(/[^\x20-\x7e]/g, '_');
+            _responseHeaders.set('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`);
+
+            _responseBody = data;
+            _isHandled = true;
+            return $response;
+        },
+        file: function (filePath, opts = {}) {
+            const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
+            if (!fs.existsSync(resolvedPath)) {
+                throw new Error(`[file] File not found: ${resolvedPath}`);
+            }
+            const data = fs.readFileSync(resolvedPath);
+            const filename = opts.filename || path.basename(resolvedPath);
+            const ext = path.extname(filename).toLowerCase();
+            const contentType = opts.contentType || getMimeType(ext, baseDir, fwDir);
+
+            _responseHeaders.set('Content-Type', contentType);
+            const dispositionType = opts.attachment ? 'attachment' : 'inline';
+            const encodedName = encodeURIComponent(filename);
+            const asciiName = filename.replace(/[^\x20-\x7e]/g, '_');
+            _responseHeaders.set('Content-Disposition', `${dispositionType}; filename="${asciiName}"; filename*=UTF-8''${encodedName}`);
+
+            _responseBody = data;
+            _isHandled = true;
+            return $response;
         },
         getStatus: () => _status,
         getHeaders: () => _responseHeaders,

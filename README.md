@@ -357,9 +357,74 @@ const config = fileUtil.readJson('./conf/app.json', { defaultVal: 1 }); // // �
 const safeName = fileUtil.safeFileName('avatar.PNG', ['png', 'jpg'], 'user_');
 ```
 
-### 10. 組み込みオブジェクト
+### 10. ファイルダウンロード支援 (`$response.download` / `$response.file`)
+
+RFC 5987 に準拠した日本語ファイル名の安全なダウンロードや、ブラウザでのインライン表示（プレビュー）に対応しています。
+
+```javascript
+// 1. 実ファイルをダウンロード (MIME 自動判定、日本語ファイル名エンコード)
+return $response.download('/path/to/報告書.pdf', '2026年実績報告書.pdf');
+
+// 2. メモリ上の Buffer / 文字列からダウンロード
+const csvBuffer = Buffer.from('id,name\n1,山田');
+return $response.download(csvBuffer, 'users.csv');
+
+// 3. インラインプレビュー表示 (Content-Disposition: inline)
+return $response.file('/path/to/invoice.pdf');
+```
+
+### 11. セキュリティヘッダー自動付与 ＆ ヘルスチェック (`conf/server.json`)
+
+`conf/server.json` の設定により、標準セキュリティヘッダーの自動付与や死活監視エンドポイント（`/healthz`）を制御できます。
+
+```json
+{
+  "port": 3000,
+  "hostname": "127.0.0.1",
+  // セキュリティヘッダー (デフォルトで有効。無効化は false、個別上書きも可能)
+  "securityHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-XSS-Protection": "1; mode=block",
+    "Referrer-Policy": "strict-origin-when-cross-origin"
+  },
+  // ヘルスチェック監視 (デフォルトで /healthz が有効)
+  "healthCheck": {
+    "enabled": true,
+    "path": "/healthz"
+  }
+}
+```
+
+- **ヘルスチェックレスポンス (`GET /healthz`)**:
+  サーバー稼働時間（`uptime`）、メモリ消費量（`memory`）、タイムスタンプ（`timestamp`）、フレームワークバージョン（`version`）を JSON で即時返却します。
+
+### 12. filter.mt.js 事後フック (`exports.after`)
+
+従来の Before フィルター（アクセス制御・認証）に加え、レスポンス返却直前のログ記録やヘッダー付与（レスポンスタイム計測など）が可能な `after` フックをサポートしています。
+
+```javascript
+// public/filter.mt.js
+exports.handler = async function() {
+    // リクエスト前処理 (true で処理継続、false で 403 遮断)
+    return true;
+};
+
+exports.after = async function({ req, res, executionTimeMs }) {
+    // レスポンス後処理: 実行時間の計測ヘッダー付与など
+    const headers = new Headers(res.headers);
+    headers.set('X-Response-Time', `${executionTimeMs}ms`);
+    return new Response(res.body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers
+    });
+};
+```
+
+### 13. 組み込みオブジェクト
 - `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `ips` (全ホップ配列), `protocol` (http/https), `isSecure` (真偽値), `host`, `baseUrl` (Nginxリバースプロキシヘッダー自動考慮), `getHeader()`, `getQuery()`, `getCookie()`
-- `$response` / `$response()`: `status(code)`, `contentType(type, charset)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `redirect(url)`
+- `$response` / `$response()`: `status(code)`, `contentType(type, charset)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `download(pathOrBuffer, filename, opts)`, `file(filePath, opts)`, `redirect(url)`
 - `$loadConf(name)`: `conf/{name}.local.json` または `conf/{name}.json` をロード（`//` や `/* ... */` などの **JS コメント** および末尾カンマに対応）
 - `$loadLib(name)`: `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` からモジュールをロード
 - `$db`: SQLite3 操作（`get`, `all`, `run`, `exec`, `transaction`）

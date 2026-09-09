@@ -168,4 +168,111 @@ describe('Server & Router Integration', () => {
         // 二重停止してもエラーにならないこと
         await stopServer(server);
     });
+
+    it('セキュリティヘッダーがデフォルトでレスポンスに自動付与されること', async () => {
+        const req = new Request('http://localhost:3000/api/data');
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+        expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+        expect(res.headers.get('X-XSS-Protection')).toBe('1; mode=block');
+        expect(res.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
+    });
+
+    it('conf/server.json で securityHeaders: false が指定された場合にヘッダーが付与されないこと', async () => {
+        const customDir = path.resolve(__dirname, '../.tmp_sec_project');
+        fs.mkdirSync(path.join(customDir, 'conf'), { recursive: true });
+        fs.mkdirSync(path.join(customDir, 'public'), { recursive: true });
+        fs.writeFileSync(path.join(customDir, 'conf', 'server.json'), JSON.stringify({
+            securityHeaders: false
+        }));
+        fs.writeFileSync(path.join(customDir, 'public', 'index.html'), 'OK');
+
+        try {
+            const req = new Request('http://localhost:3000/');
+            const res = await handleRequest(req, { baseDir: customDir, frameworkDir, isDev: true });
+            expect(res.status).toBe(200);
+            expect(res.headers.get('X-Frame-Options')).toBeNull();
+            expect(res.headers.get('X-Content-Type-Options')).toBeNull();
+        } finally {
+            fs.rmSync(customDir, { recursive: true, force: true });
+        }
+    });
+
+    it('ヘルスチェック (/healthz) がデフォルトで稼働情報を JSON で返却すること', async () => {
+        const req = new Request('http://localhost:3000/healthz');
+        const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Type')).toContain('application/json');
+        const data = await res.json();
+        expect(data.status).toBe('ok');
+        expect(typeof data.uptime).toBe('number');
+        expect(typeof data.timestamp).toBe('number');
+        expect(data.memory).toBeDefined();
+        expect(typeof data.memory.heapUsed).toBe('number');
+        expect(data.version).toBeDefined();
+    });
+
+    it('conf/server.json でヘルスチェックの path カスタマイズおよび無効化 (enabled: false) が動作すること', async () => {
+        const customDir = path.resolve(__dirname, '../.tmp_health_project');
+        fs.mkdirSync(path.join(customDir, 'conf'), { recursive: true });
+        fs.mkdirSync(path.join(customDir, 'public'), { recursive: true });
+        fs.writeFileSync(path.join(customDir, 'conf', 'server.json'), JSON.stringify({
+            healthCheck: {
+                path: '/ping'
+            }
+        }));
+
+        try {
+            const reqCustom = new Request('http://localhost:3000/ping');
+            const resCustom = await handleRequest(reqCustom, { baseDir: customDir, frameworkDir, isDev: true });
+            expect(resCustom.status).toBe(200);
+            const data = await resCustom.json();
+            expect(data.status).toBe('ok');
+
+            // 従来の /healthz は 404 になること
+            const reqDefault = new Request('http://localhost:3000/healthz');
+            const resDefault = await handleRequest(reqDefault, { baseDir: customDir, frameworkDir, isDev: true });
+            expect(resDefault.status).toBe(404);
+        } finally {
+            fs.rmSync(customDir, { recursive: true, force: true });
+        }
+    });
+
+    it('filter.mt.js の exports.after フックが実行されレスポンスを変更できること', async () => {
+        const filterDir = path.resolve(__dirname, '../.tmp_after_project');
+        fs.mkdirSync(path.join(filterDir, 'conf'), { recursive: true });
+        fs.mkdirSync(path.join(filterDir, 'public'), { recursive: true });
+        fs.writeFileSync(path.join(filterDir, 'public', 'hello.mt.js'), `
+            exports.handler = async function() {
+                return { msg: "hello world" };
+            };
+        `);
+        fs.writeFileSync(path.join(filterDir, 'public', 'filter.mt.js'), `
+            exports.handler = async function() {
+                return true;
+            };
+            exports.after = async function({ req, res, executionTimeMs }) {
+                const headers = new Headers(res.headers);
+                headers.set('X-Response-Time', executionTimeMs + 'ms');
+                headers.set('X-Custom-Filter', 'applied');
+                return new Response(res.body, {
+                    status: res.status,
+                    statusText: res.statusText,
+                    headers
+                });
+            };
+        `);
+
+        try {
+            const req = new Request('http://localhost:3000/hello');
+            const res = await handleRequest(req, { baseDir: filterDir, frameworkDir, isDev: true });
+            expect(res.status).toBe(200);
+            expect(res.headers.get('X-Custom-Filter')).toBe('applied');
+            expect(res.headers.get('X-Response-Time')).toContain('ms');
+            const json = await res.json();
+            expect(json.msg).toBe('hello world');
+        } finally {
+            fs.rmSync(filterDir, { recursive: true, force: true });
+        }
+    });
 });

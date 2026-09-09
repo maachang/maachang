@@ -22,6 +22,75 @@ const { handleServerError } = require('./errorHandler.js');
 
 // MIMEキャッシュ
 let _mimeMap = null;
+let _serverConfCache = new Map();
+
+/**
+ * サーバー設定 (conf/server.json) を取得
+ * @param {string} baseDir 
+ * @param {string} frameworkDir 
+ * @returns {Object}
+ */
+function getServerConf(baseDir, frameworkDir) {
+    const isDev = process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production';
+    if (!isDev && _serverConfCache.has(baseDir)) {
+        return _serverConfCache.get(baseDir);
+    }
+
+    let conf = {};
+    const localConf = path.join(baseDir, 'conf', 'server.local.json');
+    const projectConf = path.join(baseDir, 'conf', 'server.json');
+    const frameworkConf = frameworkDir ? path.join(frameworkDir, 'conf', 'server.json') : null;
+
+    if (fs.existsSync(localConf)) {
+        try { conf = parseJson(fs.readFileSync(localConf, 'utf-8')) || {}; } catch (e) {}
+    } else if (fs.existsSync(projectConf)) {
+        try { conf = parseJson(fs.readFileSync(projectConf, 'utf-8')) || {}; } catch (e) {}
+    } else if (frameworkConf && fs.existsSync(frameworkConf)) {
+        try { conf = parseJson(fs.readFileSync(frameworkConf, 'utf-8')) || {}; } catch (e) {}
+    }
+
+    if (!isDev) {
+        _serverConfCache.set(baseDir, conf);
+    }
+    return conf;
+}
+
+/**
+ * セキュリティヘッダーを Response に適用する
+ * @param {Response} response 
+ * @param {Object} serverConf 
+ * @returns {Response}
+ */
+function applySecurityHeaders(response, serverConf = {}) {
+    if (serverConf.securityHeaders === false) {
+        return response;
+    }
+
+    const headers = new Headers(response.headers);
+    const defaults = {
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'X-XSS-Protection': '1; mode=block',
+        'Referrer-Policy': 'strict-origin-when-cross-origin'
+    };
+
+    const custom = (typeof serverConf.securityHeaders === 'object' && serverConf.securityHeaders !== null)
+        ? serverConf.securityHeaders
+        : {};
+
+    const effective = { ...defaults, ...custom };
+    for (const [key, val] of Object.entries(effective)) {
+        if (val && !headers.has(key)) {
+            headers.set(key, val);
+        }
+    }
+
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+    });
+}
 
 /**
  * MIME設定を取得
@@ -235,10 +304,14 @@ async function executeJs(jsSource, context, options = {}) {
     fn(...argValues);
 
     const handler = moduleObj.exports.handler || exportsObj.handler;
+    let result = undefined;
     if (typeof handler === 'function') {
-        return await handler(options.params || {});
+        result = await handler(options.params || {});
     }
-    return undefined;
+    if (options.exportsRef) {
+        options.exportsRef.exports = moduleObj.exports;
+    }
+    return result;
 }
 
 /**
@@ -248,6 +321,28 @@ async function executeJs(jsSource, context, options = {}) {
  * @returns {Promise<Response>}
  */
 async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
+    const startTime = Date.now();
+    const serverConf = getServerConf(baseDir, frameworkDir);
+
+    // finalizeResponse: filter.after の実行とセキュリティヘッダーの自動付与を行うレスポンスラッパー
+    let filterAfter = null;
+    const finalizeResponse = async (rawRes) => {
+        let res = rawRes;
+        if (filterAfter && typeof filterAfter === 'function') {
+            const executionTimeMs = Date.now() - startTime;
+            try {
+                const afterResult = await filterAfter({ req, res, executionTimeMs });
+                if (afterResult instanceof Response) {
+                    res = afterResult;
+                }
+            } catch (err) {
+                // after フックでのエラー発生時は元のレスポンスを維持しつつエラーログ
+                console.error('[maachang] filter.after error:', err);
+            }
+        }
+        return applySecurityHeaders(res, serverConf);
+    };
+
     const url = new URL(req.url);
     let pathname = decodeURIComponent(url.pathname);
 
@@ -256,11 +351,36 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const favPath = path.join(baseDir, 'public', 'favicon.ico');
         if (fs.existsSync(favPath)) {
             const file = Bun.file(favPath);
-            return new Response(file, {
+            return finalizeResponse(new Response(file, {
                 headers: { 'Content-Type': 'image/x-icon' }
-            });
+            }));
         }
-        return new Response(null, { status: 204 });
+        return finalizeResponse(new Response(null, { status: 204 }));
+    }
+
+    // 1.5. ヘルスチェックエンドポイント (/healthz)
+    const healthConf = serverConf.healthCheck || {};
+    const healthPath = healthConf.path || '/healthz';
+    if (healthConf.enabled !== false && pathname === healthPath) {
+        let pkgVersion = '1.0.0';
+        try {
+            const pkgPath = frameworkDir ? path.join(frameworkDir, 'package.json') : path.join(__dirname, '../package.json');
+            if (fs.existsSync(pkgPath)) {
+                const pkg = parseJson(fs.readFileSync(pkgPath, 'utf-8'));
+                if (pkg && pkg.version) pkgVersion = pkg.version;
+            }
+        } catch (e) {}
+
+        return finalizeResponse(new Response(JSON.stringify({
+            status: 'ok',
+            uptime: Math.floor(process.uptime()),
+            timestamp: Date.now(),
+            memory: process.memoryUsage(),
+            version: pkgVersion
+        }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json; charset=utf-8' }
+        }));
     }
 
     // 2. 内部ファイル・直接アクセス禁止チェック
@@ -274,10 +394,10 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         pathname.endsWith('.jhtml.js') ||
         pathname.endsWith('.mt.html')
     ) {
-        return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        return finalizeResponse(new Response(JSON.stringify({ error: 'Forbidden' }), {
             status: 403,
             headers: { 'Content-Type': 'application/json; charset=utf-8' }
-        });
+        }));
     }
 
     // ボディのパース
@@ -319,27 +439,34 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     if (fs.existsSync(filterPath)) {
         try {
             const filterCode = fs.readFileSync(filterPath, 'utf-8');
+            const exportsRef = {};
             const filterResult = await executeJs(filterCode, context, {
-                currentFile: filterPath
+                currentFile: filterPath,
+                exportsRef
             });
 
+            if (exportsRef.exports && typeof exportsRef.exports.after === 'function') {
+                filterAfter = exportsRef.exports.after;
+            }
+
             if (context.$response.isHandled()) {
-                return buildResponse(context.$response, null, false);
+                return finalizeResponse(buildResponse(context.$response, null, false));
             }
 
             if (filterResult !== true) {
                 // 明示的に true が返されない場合は 403
-                return new Response(JSON.stringify({ error: 'Access denied by filter' }), {
+                return finalizeResponse(new Response(JSON.stringify({ error: 'Access denied by filter' }), {
                     status: 403,
                     headers: { 'Content-Type': 'application/json; charset=utf-8' }
-                });
+                }));
             }
         } catch (err) {
-            return handleServerError(err, req, {
+            const errRes = handleServerError(err, req, {
                 isDev,
                 file: filterPath,
                 title: 'Filter Execution Error'
             });
+            return finalizeResponse(errRes);
         }
     }
 
@@ -354,10 +481,10 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const indexHtml = path.join(publicDir, targetRelPath, 'index.html');
         const indexHtm = path.join(publicDir, targetRelPath, 'index.htm');
         if (fs.existsSync(indexHtml)) {
-            return serveStatic(indexHtml, req, baseDir, frameworkDir);
+            return finalizeResponse(serveStatic(indexHtml, req, baseDir, frameworkDir));
         }
         if (fs.existsSync(indexHtm)) {
-            return serveStatic(indexHtm, req, baseDir, frameworkDir);
+            return finalizeResponse(serveStatic(indexHtm, req, baseDir, frameworkDir));
         }
         targetRelPath = path.join(targetRelPath, 'index');
     }
@@ -369,13 +496,13 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         // (1) .mt.js
         const mtJsPath = path.join(publicDir, `${targetRelPath}.mt.js`);
         if (fs.existsSync(mtJsPath)) {
-            return await runDynamicJs(mtJsPath, req, context, false, isDev, _includeStack);
+            return finalizeResponse(await runDynamicJs(mtJsPath, req, context, false, isDev, _includeStack));
         }
 
         // (2) .jhtml.js (事前コンパイル済み)
         const jhtmlJsPath = path.join(publicDir, `${targetRelPath}.jhtml.js`);
         if (fs.existsSync(jhtmlJsPath)) {
-            return await runDynamicJs(jhtmlJsPath, req, context, true, isDev, _includeStack);
+            return finalizeResponse(await runDynamicJs(jhtmlJsPath, req, context, true, isDev, _includeStack));
         }
 
         // (3) .mt.html または .jhtml (ローカル・オンデマンド変換)
@@ -384,48 +511,48 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
 
         if (templatePath) {
-            return await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack);
+            return finalizeResponse(await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack));
         }
 
         // (4) 静的 index.html / index.htm (ディレクトリ指定の場合)
         const dirIndexHtml = path.join(publicDir, targetRelPath, 'index.html');
         if (fs.existsSync(dirIndexHtml)) {
-            return serveStatic(dirIndexHtml, req, baseDir, frameworkDir);
+            return finalizeResponse(serveStatic(dirIndexHtml, req, baseDir, frameworkDir));
         }
     } else if (ext === '.jhtml') {
         // B. .jhtml で直接リクエストされた場合
         const basePath = targetRelPath.slice(0, -ext.length);
         const jhtmlJsPath = path.join(publicDir, `${basePath}.jhtml.js`);
         if (fs.existsSync(jhtmlJsPath)) {
-            return await runDynamicJs(jhtmlJsPath, req, context, true, isDev, _includeStack);
+            return finalizeResponse(await runDynamicJs(jhtmlJsPath, req, context, true, isDev, _includeStack));
         }
         const mtHtmlPath = path.join(publicDir, `${basePath}.mt.html`);
         const jhtmlPath = path.join(publicDir, `${basePath}.jhtml`);
         const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
         if (templatePath) {
-            return await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack);
+            return finalizeResponse(await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack));
         }
     } else {
         // C. 静的ファイル配信 (プロジェクト側優先、なければフレームワーク側を探索)
         const staticFilePath = path.join(publicDir, targetRelPath);
         if (fs.existsSync(staticFilePath) && fs.statSync(staticFilePath).isFile()) {
-            return serveStatic(staticFilePath, req, baseDir, frameworkDir);
+            return finalizeResponse(serveStatic(staticFilePath, req, baseDir, frameworkDir));
         }
 
         // フレームワーク本体の public 配下をフォールバック探索 (例: /jhtml.browser.js など)
         if (frameworkDir) {
             const frameworkStaticFile = path.join(frameworkDir, 'public', targetRelPath);
             if (fs.existsSync(frameworkStaticFile) && fs.statSync(frameworkStaticFile).isFile()) {
-                return serveStatic(frameworkStaticFile, req, baseDir, frameworkDir);
+                return finalizeResponse(serveStatic(frameworkStaticFile, req, baseDir, frameworkDir));
             }
         }
     }
 
     // 404 Not Found
-    return new Response(JSON.stringify({ error: 'Not Found', path: pathname }), {
+    return finalizeResponse(new Response(JSON.stringify({ error: 'Not Found', path: pathname }), {
         status: 404,
         headers: { 'Content-Type': 'application/json; charset=utf-8' }
-    });
+    }));
 }
 
 /**

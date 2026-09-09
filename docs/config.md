@@ -66,8 +66,29 @@ const isDebug = process.env.DEBUG_MODE === 'true';
 
 | ファイル | 役割 | 主な設定項目 |
 |---|---|---|
-| `conf/server.json` | サーバー基本設定 | `host`, `port`, `cors` |
+| `conf/server.json` | サーバー基本設定 | `host`, `port`, `cors`, `securityHeaders`, `healthCheck` |
 | `conf/session.json` | セッション管理設定 | `dbPath`, `cookieName`, `expiresIn`, `secure`, `sameSite` |
 | `conf/env.json` | アプリケーション環境変数 | 任意のキー・バリュー（`process.env` に展開） |
 | `conf/log.json` | ロガー設定 | `dir`, `file`, `level`, `stdout` |
 | `conf/mime.json` | MIME タイプ拡張定義 | 拡張子と Content-Type のマッピング |
+
+### 5. `conf/server.json` の主要項目
+
+```json
+{
+  "port": 3000,
+  "hostname": "127.0.0.1",
+  // セキュリティヘッダー自動付与 (true / false または個別設定オブジェクト)
+  "securityHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-XSS-Protection": "1; mode=block",
+    "Referrer-Policy": "strict-origin-when-cross-origin"
+  },
+  // ヘルスチェック死活監視 (/healthz)
+  "healthCheck": {
+    "enabled": true,
+    "path": "/healthz"
+  }
+}
+```

@@ -69,7 +69,7 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 | ヘルパー | 説明 | 主なメソッド / プロパティ |
 |---|---|---|
 | `$request` / `$request()` | リクエスト情報の取得 | `.path`, `.method`, `.query`, `.body`, `.cookies`, `.ip`, `.ips`, `.protocol`, `.isSecure`, `.host`, `.baseUrl`<br>`.getHeader(key)`, `.getQuery(key, def)`, `.getCookie(key, def)` |
-| `$response` / `$response()` | レスポンスの生成・返却 | `.status(code)`, `.contentType(type, charset)`, `.header(key, val)`, `.setCookie(name, val, opt)`, `.deleteCookie(name)`<br>`.json(data, status)`, `.html(str, status)`, `.text(str, status)`, `.redirect(url, status)`, `.body(val)` |
+| `$response` / `$response()` | レスポンスの生成・返却 | `.status(code)`, `.contentType(type, charset)`, `.header(key, val)`, `.setCookie(name, val, opt)`, `.deleteCookie(name)`<br>`.json(data, status)`, `.html(str, status)`, `.text(str, status)`, `.download(pathOrBuffer, filename, opts)`, `.file(filePath, opts)`, `.redirect(url, status)`, `.body(val)` |
 | `$include(path, params)` | 別テンプレート/HTMLのインクルード | `${$include("./parts/header.mt.html", { title: "..." })}`<br>（`${$include(...)}` は自動で await 補完） |
 | `$params` | インクルードパラメータの参照 | テンプレートやパーツ内で `${$params.title}` や `${$params.user}` としてアクセス |
 | `$loadLib("name.js")` | モジュールのロード | `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` の順で検索してロード |
