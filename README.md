@@ -34,10 +34,10 @@ maachang はあえてこれらと距離を置き、**「PHP のようにディ�
    - **JHTML (`.mt.html` / `.jhtml`)**: `<% %>`, `<%= %>`, `${ }` を備えたシンプルなテンプレートエンジン。
    - **共通フィルター (`filter.mt.js`)**: 認証やロギングなどの前処理を一元管理。
    - **安全なアクセス制御**: 内部ファイル（`.mt.js`, `.jhtml.js`, `.mt.html`, `/filter` 等）への直接アクセスは自動で 403 Forbidden 応答。
-3. **SQLite3 標準セッション管理**:
-   - `bun:sqlite` を利用した軽量 SQLite3 セッション管理モジュール（`modules/session.js`）を標準搭載。
-4. **日別ローテーションロガー**:
-   - 日別ファイル出力（`./log/logout.YYYY-MM-DD.log`）と標準出力を兼ね備えたロガー（`modules/logger.js`）を内蔵。
+3. **SQLite3 標準セッション管理 & セッション固定化対策**:
+   - `bun:sqlite` を利用した軽量 SQLite3 セッション管理モジュール（`modules/session.js`）を標準搭載。ログイン時のセッション固定化攻撃を防ぐ `session.regenerateSession($request, $response)` や、HTTPS 通信時の Cookie `Secure` 属性自動付与に対応。
+4. **日別ローテーションロガー & 機密データマスキング**:
+   - 日別ファイル出力（`./log/logout.YYYY-MM-DD.log`）と標準出力を兼ね備えたロガー（`modules/logger.js`）を内蔵。パスワードやトークン、APIキーなどの機密情報を自動で `***` に伏字化。
 5. **リッチエラーハンドリング（開発時コードハイライト / 本番時隠蔽）**:
    - 開発時はエラー発生行および前後コードをハイライトした HTML 画面やスタックトレース付き JSON を返却。
    - 本番時（`--prod`）は内部構造を隠蔽した安全な 500 応答を返しつつ、日別ログファイルへ完全なエラー詳細を記録（詳細は [docs/error-handling.md](docs/error-handling.md) 参照）。
@@ -373,22 +373,49 @@ return $response.download(csvBuffer, 'users.csv');
 return $response.file('/path/to/invoice.pdf');
 ```
 
-### 11. セキュリティヘッダー自動付与 ＆ ヘルスチェック (`conf/server.json`)
+### 11. セキュリティ設定・ヘッダー自動付与 ＆ ヘルスチェック (`conf/server.json`)
 
-`conf/server.json` の設定により、標準セキュリティヘッダーの自動付与や死活監視エンドポイント（`/healthz`）を制御できます。
+`conf/server.json` の設定により、DoS攻撃対策（ボディサイズ制限・レートリミット）、CORSプリフライト、標準セキュリティヘッダー自動付与（HSTS / CSP）、死活監視エンドポイント（`/healthz`）を宣言的に制御できます。
 
 ```json
 {
   "port": 3000,
   "hostname": "127.0.0.1",
-  // セキュリティヘッダー (デフォルトで有効。無効化は false、個別上書きも可能)
+
+  // 1. リクエストボディ上限サイズ (DoS対策: 超過時は 413 Payload Too Large を返却、デフォルト: 10MB)
+  "maxBodyLength": 10485760,
+
+  // 2. レートリミット (IP単位のブルートフォース・過剰アクセス制限: 超過時は 429 Too Many Requests)
+  "rateLimit": {
+    "enabled": true,
+    "windowMs": 60000, // 監視時間 (ミリ秒)
+    "max": 100,        // 許容最大リクエスト数
+    "message": "Too Many Requests"
+  },
+
+  // 3. CORS 設定 (API サーバーとしてのクロスオリジン制御: OPTIONS プリフライトに 204 自動応答)
+  "cors": {
+    "enabled": true,
+    "origin": ["https://app.example.com"], // または "*"
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "headers": ["Content-Type", "Authorization"],
+    "credentials": true,
+    "maxAge": 86400
+  },
+
+  // 4. セキュリティヘッダー (デフォルトで有効。HTTPS時は Strict-Transport-Security を自動付与)
   "securityHeaders": {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "X-XSS-Protection": "1; mode=block",
-    "Referrer-Policy": "strict-origin-when-cross-origin"
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "hsts": true // HTTPS通信時に max-age=31536000; includeSubDomains を付与 (無効化は false)
   },
-  // ヘルスチェック監視 (デフォルトで /healthz が有効)
+
+  // 5. CSP (Content-Security-Policy) の設定
+  "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+
+  // 6. ヘルスチェック監視 (デフォルトで /healthz が有効)
   "healthCheck": {
     "enabled": true,
     "path": "/healthz"
@@ -398,6 +425,8 @@ return $response.file('/path/to/invoice.pdf');
 
 - **ヘルスチェックレスポンス (`GET /healthz`)**:
   サーバー稼働時間（`uptime`）、メモリ消費量（`memory`）、タイムスタンプ（`timestamp`）、フレームワークバージョン（`version`）を JSON で即時返却します。
+- **パストラバーサル防御**:
+  多重URLエンコード（`%252e%252e`）や null byte（`\0`）を含むリクエストは 400/403 で自動遮断され、公開ディレクトリ外へのアクセスは完全に防御されます。
 
 ### 12. filter.mt.js 事後フック (`exports.after`)
 

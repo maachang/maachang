@@ -92,20 +92,62 @@ for (const d of dirs) {
 }
 
 // 1. conf/server.json
-fs.writeFileSync(path.join(targetDir, 'conf', 'server.json'), JSON.stringify({
-    port: 3000,
-    hostname: '0.0.0.0'
-}, null, 2) + '\n');
+fs.writeFileSync(path.join(targetDir, 'conf', 'server.json'), `{
+  // サーバー待受設定
+  "port": 3000,
+  "hostname": "0.0.0.0",
+
+  // リクエストボディ上限サイズ (バイト、デフォルト: 10MB)
+  "maxBodyLength": 10485760,
+
+  // レートリミット設定 (IP単位、過剰アクセス時に 429 応答)
+  "rateLimit": {
+    "enabled": false,
+    "windowMs": 60000,
+    "max": 100,
+    "message": "Too Many Requests"
+  },
+
+  // CORS 設定 (API サーバーとしてクロスオリジンを許可する場合)
+  "cors": {
+    "enabled": false,
+    "origin": "*",
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "credentials": false
+  },
+
+  // セキュリティヘッダー (デフォルトで標準ヘッダー自動付与、HTTPS時はHSTS自動付与)
+  "securityHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-XSS-Protection": "1; mode=block",
+    "Referrer-Policy": "strict-origin-when-cross-origin"
+  },
+
+  // 死活監視ヘルスチェックエンドポイント (/healthz)
+  "healthCheck": {
+    "enabled": true,
+    "path": "/healthz"
+  }
+}
+`);
 
 // 2. conf/session.json
-fs.writeFileSync(path.join(targetDir, 'conf', 'session.json'), JSON.stringify({
-    dbPath: './data/session.db',
-    cookieName: `${projectName}_sid`,
-    timeoutMin: 60,
-    sameSite: 'Lax',
-    httpOnly: true,
-    secure: false
-}, null, 2) + '\n');
+fs.writeFileSync(path.join(targetDir, 'conf', 'session.json'), `{
+  // SQLite セッションDB保存先
+  "dbPath": "./data/session.db",
+  // セッションCookie名
+  "cookieName": "${projectName}_sid",
+  // 有効期限 (分)
+  "timeoutMin": 60,
+  // SameSite属性 (Lax / Strict / None)
+  "sameSite": "Lax",
+  // JavaScriptからのアクセス禁止 (XSS保護)
+  "httpOnly": true,
+  // HTTPS通信のみCookie送信 (未指定またはfalseの場合でも、HTTPS接続時は自動的にSecureが付与されます)
+  "secure": false
+}
+`);
 
 // 3. conf/env.json
 fs.writeFileSync(path.join(targetDir, 'conf', 'env.json'), JSON.stringify({
