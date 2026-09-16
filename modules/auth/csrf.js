@@ -25,11 +25,16 @@
     const crypto = typeof $require === 'function' ? $require('crypto') : require('node:crypto');
 
     // [環境変数]CSRFトークン署名用シークレット.
+    let _warnedDefaultSecret = false;
     const _SECRET_ENV = "CSRF_SECRET";
     const _getSecret = function () {
         const ret = process.env[_SECRET_ENV];
         if (ret == undefined || ret == null || ret === "") {
-            // デフォルトシークレット(本番運用では必ず環境変数を設定すること).
+            const isProd = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
+            if (isProd && !_warnedDefaultSecret) {
+                console.warn("[SECURITY WARNING] CSRF_SECRET environment variable is not set in production. Using default secret is dangerous. Please set CSRF_SECRET.");
+                _warnedDefaultSecret = true;
+            }
             return "minto-default-csrf-secret";
         }
         return ret;

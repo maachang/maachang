@@ -137,6 +137,23 @@ const _JHTML_SRC_EXTENSION = ".mt.html";
 const _RUN_JHTML = ".jhtml.js";
 
 /**
+ * 指定されたファイルパスが baseDir 配下に安全に収まっているか検証する
+ * @param {string} baseDir 許可ベースディレクトリ
+ * @param {string} targetFile 対象ファイルパス
+ * @returns {boolean}
+ */
+function isSafePath(baseDir, targetFile) {
+    try {
+        const resolvedBase = path.resolve(baseDir);
+        const resolvedTarget = path.resolve(targetFile);
+        const rel = path.relative(resolvedBase, resolvedTarget);
+        return !rel.startsWith('..') && !path.isAbsolute(rel);
+    } catch (_) {
+        return false;
+    }
+}
+
+/**
  * minto 互換の $include ハンドラを生成する
  * @param {Object} context 
  * @param {string} publicDir 
@@ -209,6 +226,7 @@ function createIncludeHandler(context, publicDir, isDev = true) {
                     candidates.push({ path: base + _RUN_JHTML, conv: false });
                     candidates.push({ path: base + ".html", conv: true });
                     candidates.push({ path: base + ".htm", conv: true });
+                    candidates.push({ path: base + ".htm", conv: false });
                     candidates.push({ path: base, conv: false });
                 } else {
                     candidates.push({ path: base + _RUN_JHTML, conv: false });
@@ -220,10 +238,10 @@ function createIncludeHandler(context, publicDir, isDev = true) {
             }
         }
 
-        // 存在する候補を探す.
+        // 存在する候補を探す (publicDir配下の境界チェック付き).
         let target = null;
         for (let cand of candidates) {
-            if (fs.existsSync(cand.path) && fs.statSync(cand.path).isFile()) {
+            if (isSafePath(publicDir, cand.path) && fs.existsSync(cand.path) && fs.statSync(cand.path).isFile()) {
                 target = cand;
                 break;
             }
@@ -344,7 +362,40 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     };
 
     const url = new URL(req.url);
-    let pathname = decodeURIComponent(url.pathname);
+    // パストラバーサルおよび多重URLエンコードの対策
+    let pathname = url.pathname;
+    try {
+        let prev = '';
+        let loopCount = 0;
+        // 多重URLデコード (最大3回)
+        while (pathname !== prev && loopCount < 3) {
+            prev = pathname;
+            pathname = decodeURIComponent(pathname);
+            loopCount++;
+        }
+    } catch (_) {
+        return finalizeResponse(new Response(JSON.stringify({ error: 'Bad Request' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json; charset=utf-8' }
+        }));
+    }
+
+    // null byte チェック
+    if (pathname.includes('\0')) {
+        return finalizeResponse(new Response(JSON.stringify({ error: 'Bad Request' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json; charset=utf-8' }
+        }));
+    }
+
+    // パストラバーサル (.. セグメント) チェック
+    const rawSegments = pathname.replace(/\\/g, '/').split('/');
+    if (rawSegments.some(seg => seg === '..')) {
+        return finalizeResponse(new Response(JSON.stringify({ error: 'Forbidden' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json; charset=utf-8' }
+        }));
+    }
 
     // 1. favicon.ico の即時対応
     if (pathname === '/favicon.ico') {
@@ -400,13 +451,35 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         }));
     }
 
-    // ボディのパース
+    // ボディのパース (DoS対策: maxBodyLength 制限)
+    const maxBodyLength = (typeof serverConf.maxBodyLength === 'number' && serverConf.maxBodyLength > 0)
+        ? serverConf.maxBodyLength
+        : 10 * 1024 * 1024; // デフォルト 10MB
+
+    const contentLengthHeader = req.headers.get('content-length');
+    if (contentLengthHeader) {
+        const contentLength = parseInt(contentLengthHeader, 10);
+        if (!isNaN(contentLength) && contentLength > maxBodyLength) {
+            return finalizeResponse(new Response(JSON.stringify({ error: 'Payload Too Large' }), {
+                status: 413,
+                headers: { 'Content-Type': 'application/json; charset=utf-8' }
+            }));
+        }
+    }
+
     let parsedBody = null;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
         const contentType = req.headers.get('content-type') || '';
         try {
             if (contentType.includes('application/json')) {
-                parsedBody = await req.json();
+                const text = await req.text();
+                if (text.length > maxBodyLength) {
+                    return finalizeResponse(new Response(JSON.stringify({ error: 'Payload Too Large' }), {
+                        status: 413,
+                        headers: { 'Content-Type': 'application/json; charset=utf-8' }
+                    }));
+                }
+                parsedBody = JSON.parse(text);
             } else if (contentType.includes('application/x-www-form-urlencoded')) {
                 const formData = await req.formData();
                 parsedBody = {};
@@ -414,7 +487,14 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
                     parsedBody[key] = value;
                 }
             } else {
-                parsedBody = await req.text();
+                const text = await req.text();
+                if (text.length > maxBodyLength) {
+                    return finalizeResponse(new Response(JSON.stringify({ error: 'Payload Too Large' }), {
+                        status: 413,
+                        headers: { 'Content-Type': 'application/json; charset=utf-8' }
+                    }));
+                }
+                parsedBody = text;
             }
         } catch (e) {
             parsedBody = null;
@@ -480,10 +560,10 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     if (targetRelPath === '' || targetRelPath.endsWith('/')) {
         const indexHtml = path.join(publicDir, targetRelPath, 'index.html');
         const indexHtm = path.join(publicDir, targetRelPath, 'index.htm');
-        if (fs.existsSync(indexHtml)) {
+        if (isSafePath(publicDir, indexHtml) && fs.existsSync(indexHtml)) {
             return finalizeResponse(serveStatic(indexHtml, req, baseDir, frameworkDir));
         }
-        if (fs.existsSync(indexHtm)) {
+        if (isSafePath(publicDir, indexHtm) && fs.existsSync(indexHtm)) {
             return finalizeResponse(serveStatic(indexHtm, req, baseDir, frameworkDir));
         }
         targetRelPath = path.join(targetRelPath, 'index');
@@ -495,20 +575,22 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     if (!ext) {
         // (1) .mt.js
         const mtJsPath = path.join(publicDir, `${targetRelPath}.mt.js`);
-        if (fs.existsSync(mtJsPath)) {
+        if (isSafePath(publicDir, mtJsPath) && fs.existsSync(mtJsPath)) {
             return finalizeResponse(await runDynamicJs(mtJsPath, req, context, false, isDev, _includeStack));
         }
 
         // (2) .jhtml.js (事前コンパイル済み)
         const jhtmlJsPath = path.join(publicDir, `${targetRelPath}.jhtml.js`);
-        if (fs.existsSync(jhtmlJsPath)) {
+        if (isSafePath(publicDir, jhtmlJsPath) && fs.existsSync(jhtmlJsPath)) {
             return finalizeResponse(await runDynamicJs(jhtmlJsPath, req, context, true, isDev, _includeStack));
         }
 
         // (3) .mt.html または .jhtml (ローカル・オンデマンド変換)
         const mtHtmlPath = path.join(publicDir, `${targetRelPath}.mt.html`);
         const jhtmlPath = path.join(publicDir, `${targetRelPath}.jhtml`);
-        const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
+        const templatePath = (isSafePath(publicDir, mtHtmlPath) && fs.existsSync(mtHtmlPath))
+            ? mtHtmlPath
+            : ((isSafePath(publicDir, jhtmlPath) && fs.existsSync(jhtmlPath)) ? jhtmlPath : null);
 
         if (templatePath) {
             return finalizeResponse(await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack));
@@ -516,33 +598,36 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
 
         // (4) 静的 index.html / index.htm (ディレクトリ指定の場合)
         const dirIndexHtml = path.join(publicDir, targetRelPath, 'index.html');
-        if (fs.existsSync(dirIndexHtml)) {
+        if (isSafePath(publicDir, dirIndexHtml) && fs.existsSync(dirIndexHtml)) {
             return finalizeResponse(serveStatic(dirIndexHtml, req, baseDir, frameworkDir));
         }
     } else if (ext === '.jhtml') {
         // B. .jhtml で直接リクエストされた場合
         const basePath = targetRelPath.slice(0, -ext.length);
         const jhtmlJsPath = path.join(publicDir, `${basePath}.jhtml.js`);
-        if (fs.existsSync(jhtmlJsPath)) {
+        if (isSafePath(publicDir, jhtmlJsPath) && fs.existsSync(jhtmlJsPath)) {
             return finalizeResponse(await runDynamicJs(jhtmlJsPath, req, context, true, isDev, _includeStack));
         }
         const mtHtmlPath = path.join(publicDir, `${basePath}.mt.html`);
         const jhtmlPath = path.join(publicDir, `${basePath}.jhtml`);
-        const templatePath = fs.existsSync(mtHtmlPath) ? mtHtmlPath : (fs.existsSync(jhtmlPath) ? jhtmlPath : null);
+        const templatePath = (isSafePath(publicDir, mtHtmlPath) && fs.existsSync(mtHtmlPath))
+            ? mtHtmlPath
+            : ((isSafePath(publicDir, jhtmlPath) && fs.existsSync(jhtmlPath)) ? jhtmlPath : null);
         if (templatePath) {
             return finalizeResponse(await runJhtmlTemplate(templatePath, req, context, isDev, _includeStack));
         }
     } else {
         // C. 静的ファイル配信 (プロジェクト側優先、なければフレームワーク側を探索)
         const staticFilePath = path.join(publicDir, targetRelPath);
-        if (fs.existsSync(staticFilePath) && fs.statSync(staticFilePath).isFile()) {
+        if (isSafePath(publicDir, staticFilePath) && fs.existsSync(staticFilePath) && fs.statSync(staticFilePath).isFile()) {
             return finalizeResponse(serveStatic(staticFilePath, req, baseDir, frameworkDir));
         }
 
         // フレームワーク本体の public 配下をフォールバック探索 (例: /jhtml.browser.js など)
         if (frameworkDir) {
-            const frameworkStaticFile = path.join(frameworkDir, 'public', targetRelPath);
-            if (fs.existsSync(frameworkStaticFile) && fs.statSync(frameworkStaticFile).isFile()) {
+            const frameworkPublic = path.join(frameworkDir, 'public');
+            const frameworkStaticFile = path.join(frameworkPublic, targetRelPath);
+            if (isSafePath(frameworkPublic, frameworkStaticFile) && fs.existsSync(frameworkStaticFile) && fs.statSync(frameworkStaticFile).isFile()) {
                 return finalizeResponse(serveStatic(frameworkStaticFile, req, baseDir, frameworkDir));
             }
         }

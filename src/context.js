@@ -18,6 +18,23 @@ const _confCache = new Map();
 let _mimeMapCache = null;
 
 /**
+ * 指定されたファイルパスが baseDir 配下に安全に収まっているか検証する
+ * @param {string} baseDir 許可ベースディレクトリ
+ * @param {string} targetFile 対象ファイルパス
+ * @returns {boolean}
+ */
+function isSafePath(baseDir, targetFile) {
+    try {
+        const resolvedBase = path.resolve(baseDir);
+        const resolvedTarget = path.resolve(targetFile);
+        const rel = path.relative(resolvedBase, resolvedTarget);
+        return !rel.startsWith('..') && !path.isAbsolute(rel);
+    } catch (_) {
+        return false;
+    }
+}
+
+/**
  * 拡張子に対応する MIME タイプを取得
  * @param {string} ext 拡張子 (.csv, .pdf 等)
  * @param {string} baseDir 
@@ -470,7 +487,11 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
             let filename = downloadFileName;
 
             if (typeof pathOrBuffer === 'string') {
-                const resolvedPath = path.isAbsolute(pathOrBuffer) ? pathOrBuffer : path.resolve(baseDir, pathOrBuffer);
+                const allowedBase = opts.baseDir || baseDir;
+                const resolvedPath = path.isAbsolute(pathOrBuffer) ? pathOrBuffer : path.resolve(allowedBase, pathOrBuffer);
+                if (!opts.allowAbsolute && !isSafePath(allowedBase, resolvedPath)) {
+                    throw new Error(`[download] Access denied: ${pathOrBuffer}`);
+                }
                 if (!fs.existsSync(resolvedPath)) {
                     throw new Error(`[download] File not found: ${resolvedPath}`);
                 }
@@ -505,7 +526,11 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
             return $response;
         },
         file: function (filePath, opts = {}) {
-            const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
+            const allowedBase = opts.baseDir || baseDir;
+            const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(allowedBase, filePath);
+            if (!opts.allowAbsolute && !isSafePath(allowedBase, resolvedPath)) {
+                throw new Error(`[file] Access denied: ${filePath}`);
+            }
             if (!fs.existsSync(resolvedPath)) {
                 throw new Error(`[file] File not found: ${resolvedPath}`);
             }
@@ -551,7 +576,11 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
      */
     function $loadConf(confName) {
         if (!confName) return null;
-        const normalized = confName.endsWith('.json') ? confName : `${confName}.json`;
+        const rawConf = String(confName).replace(/\\/g, '/');
+        if (rawConf.split('/').some(seg => seg === '..')) {
+            throw new Error(`[$loadConf] Invalid config path: ${confName}`);
+        }
+        const normalized = rawConf.endsWith('.json') ? rawConf : `${rawConf}.json`;
         const baseName = normalized.replace(/\.json$/, '');
 
         const isDev = process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production';
@@ -566,16 +595,18 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         // 1. {baseDir}/conf/{name}.local.json
         // 2. {baseDir}/conf/{name}.json
         // 3. {fwDir}/conf/{name}.json
-        const localPath = path.join(baseDir, 'conf', `${baseName}.local.json`);
-        const projectConfPath = path.join(baseDir, 'conf', normalized);
-        const frameworkConfPath = path.join(fwDir, 'conf', normalized);
+        const confDir = path.join(baseDir, 'conf');
+        const fwConfDir = path.join(fwDir, 'conf');
+        const localPath = path.join(confDir, `${baseName}.local.json`);
+        const projectConfPath = path.join(confDir, normalized);
+        const frameworkConfPath = path.join(fwConfDir, normalized);
 
         let targetPath = null;
-        if (fs.existsSync(localPath)) {
+        if (isSafePath(confDir, localPath) && fs.existsSync(localPath)) {
             targetPath = localPath;
-        } else if (fs.existsSync(projectConfPath)) {
+        } else if (isSafePath(confDir, projectConfPath) && fs.existsSync(projectConfPath)) {
             targetPath = projectConfPath;
-        } else if (fs.existsSync(frameworkConfPath)) {
+        } else if (isSafePath(fwConfDir, frameworkConfPath) && fs.existsSync(frameworkConfPath)) {
             targetPath = frameworkConfPath;
         }
 
@@ -603,7 +634,11 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
      */
     function $loadLib(libName) {
         if (!libName) return null;
-        const normalized = libName.endsWith('.js') ? libName : `${libName}.js`;
+        const rawLib = String(libName).replace(/\\/g, '/');
+        if (rawLib.split('/').some(seg => seg === '..')) {
+            throw new Error(`[$loadLib] Invalid module path: ${libName}`);
+        }
+        const normalized = rawLib.endsWith('.js') ? rawLib : `${rawLib}.js`;
 
         // 探索順序:
         // 1. {baseDir}/{normalized} (validates/... や lib/... などの指定時)
@@ -612,7 +647,7 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         // 4. {fwDir}/modules/{normalized}
         // 5. {fwDir}/modules/*/{normalized}
         const directProject = path.join(baseDir, normalized);
-        if (fs.existsSync(directProject) && fs.statSync(directProject).isFile()) {
+        if (isSafePath(baseDir, directProject) && fs.existsSync(directProject) && fs.statSync(directProject).isFile()) {
             const resolved = path.resolve(directProject);
             if (process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production') {
                 delete require.cache[resolved];
@@ -621,7 +656,7 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         }
 
         const projectLib = path.join(baseDir, 'lib', normalized);
-        if (fs.existsSync(projectLib)) {
+        if (isSafePath(path.join(baseDir, 'lib'), projectLib) && fs.existsSync(projectLib)) {
             const resolved = path.resolve(projectLib);
             if (process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production') {
                 delete require.cache[resolved];
@@ -630,7 +665,7 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         }
 
         const projectValidates = path.join(baseDir, 'validates', normalized);
-        if (fs.existsSync(projectValidates)) {
+        if (isSafePath(path.join(baseDir, 'validates'), projectValidates) && fs.existsSync(projectValidates)) {
             const resolved = path.resolve(projectValidates);
             if (process.env.APP_ENV === 'development' || process.env.NODE_ENV !== 'production') {
                 delete require.cache[resolved];
@@ -639,7 +674,7 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         }
 
         const frameworkDirect = path.join(fwDir, 'modules', normalized);
-        if (fs.existsSync(frameworkDirect)) {
+        if (isSafePath(path.join(fwDir, 'modules'), frameworkDirect) && fs.existsSync(frameworkDirect)) {
             return require(frameworkDirect);
         }
 
@@ -649,7 +684,7 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
             for (const dirent of subdirs) {
                 if (dirent.isDirectory()) {
                     const subPath = path.join(modulesDir, dirent.name, normalized);
-                    if (fs.existsSync(subPath)) {
+                    if (isSafePath(path.join(modulesDir, dirent.name), subPath) && fs.existsSync(subPath)) {
                         return require(subPath);
                     }
                 }
@@ -676,5 +711,6 @@ module.exports = {
     getClientIps,
     loadEnv,
     stripJsonComments,
-    parseJson
+    parseJson,
+    isSafePath
 };
