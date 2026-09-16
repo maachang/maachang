@@ -147,6 +147,40 @@ function setting(options = {}) {
     _isInitialized = true;
 }
 
+const SENSITIVE_KEY_REGEX = /^(password|passwd|secret|token|apikey|api_key|credit_card|card_number|authorization|auth)$/i;
+
+/**
+ * 機密データ（パスワード、トークン、秘密鍵等）を再帰的にマスキングする
+ * @param {*} data
+ * @returns {*}
+ */
+function maskSensitiveData(data) {
+    if (data === null || data === undefined) return data;
+    if (typeof data === 'string') {
+        // Authorization: Bearer <token>
+        let masked = data.replace(/(Bearer\s+)[A-Za-z0-9\-._~+/]+=*/gi, '$1***');
+        // JSON 形式またはクエリ形式のキー: "password": "value", password=value
+        masked = masked.replace(/("?(?:password|passwd|secret|token|apiKey|api_key)"?\s*[:=]\s*)"([^"]+)"/gi, '$1"***"');
+        return masked;
+    }
+    if (Array.isArray(data)) {
+        return data.map(maskSensitiveData);
+    }
+    if (typeof data === 'object') {
+        if (data instanceof Error) return data;
+        const copy = {};
+        for (const [key, val] of Object.entries(data)) {
+            if (SENSITIVE_KEY_REGEX.test(key)) {
+                copy[key] = '***';
+            } else {
+                copy[key] = maskSensitiveData(val);
+            }
+        }
+        return copy;
+    }
+    return data;
+}
+
 /**
  * ログを出力
  * @param {number} level 
@@ -157,10 +191,11 @@ function writeLog(level, ...args) {
         return;
     }
 
+    const maskedArgs = args.map(maskSensitiveData);
     const now = new Date();
     const { full, dateOnly } = formatDate(now);
     const levelName = LEVEL_NAMES[level] || 'LOG';
-    const message = util.format(...args);
+    const message = util.format(...maskedArgs);
     const logLine = `[${full}] [${levelName}] ${message}\n`;
 
     // 1. ファイル出力
@@ -194,6 +229,7 @@ const logger = {
     warn: (...args) => writeLog(LEVEL_WARN, ...args),
     error: (...args) => writeLog(LEVEL_ERROR, ...args),
     log: (...args) => writeLog(LEVEL_LOG, ...args),
+    maskSensitiveData,
     // 定数
     LEVEL_TRACE,
     LEVEL_DEBUG,

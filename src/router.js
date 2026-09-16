@@ -59,9 +59,10 @@ function getServerConf(baseDir, frameworkDir) {
  * セキュリティヘッダーを Response に適用する
  * @param {Response} response 
  * @param {Object} serverConf 
+ * @param {boolean} [isSecure=false] 
  * @returns {Response}
  */
-function applySecurityHeaders(response, serverConf = {}) {
+function applySecurityHeaders(response, serverConf = {}, isSecure = false) {
     if (serverConf.securityHeaders === false) {
         return response;
     }
@@ -74,13 +75,27 @@ function applySecurityHeaders(response, serverConf = {}) {
         'Referrer-Policy': 'strict-origin-when-cross-origin'
     };
 
-    const custom = (typeof serverConf.securityHeaders === 'object' && serverConf.securityHeaders !== null)
+    // HTTPS 接続時の HSTS (Strict-Transport-Security)
+    const customSec = (typeof serverConf.securityHeaders === 'object' && serverConf.securityHeaders !== null)
         ? serverConf.securityHeaders
         : {};
 
-    const effective = { ...defaults, ...custom };
+    if (isSecure && customSec.hsts !== false && serverConf.hsts !== false) {
+        defaults['Strict-Transport-Security'] = typeof customSec.hsts === 'string'
+            ? customSec.hsts
+            : 'max-age=31536000; includeSubDomains';
+    }
+
+    // CSP (Content-Security-Policy) の反映
+    if (serverConf.csp) {
+        defaults['Content-Security-Policy'] = typeof serverConf.csp === 'string'
+            ? serverConf.csp
+            : Object.entries(serverConf.csp).map(([k, v]) => `${k} ${v}`).join('; ');
+    }
+
+    const effective = { ...defaults, ...customSec };
     for (const [key, val] of Object.entries(effective)) {
-        if (val && !headers.has(key)) {
+        if (val && !headers.has(key) && key !== 'hsts') {
             headers.set(key, val);
         }
     }
@@ -90,6 +105,112 @@ function applySecurityHeaders(response, serverConf = {}) {
         statusText: response.statusText,
         headers
     });
+}
+
+// レートリミット管理用ストア (IP -> { count, resetAt })
+const _rateLimitStore = new Map();
+
+/**
+ * レートリミットを判定・更新する
+ * @param {string} ip 
+ * @param {Object} rateLimitConf 
+ * @returns {{ allowed: boolean, limit: number, remaining: number, resetSeconds: number }}
+ */
+function checkRateLimit(ip, rateLimitConf) {
+    if (!rateLimitConf || rateLimitConf.enabled === false) {
+        return { allowed: true };
+    }
+    const windowMs = rateLimitConf.windowMs || 60 * 1000; // デフォルト 1分
+    const max = rateLimitConf.max || 100; // デフォルト 100リクエスト
+    const now = Date.now();
+
+    // 定期的な期限切れエントリの削除 (サイズ肥大化防止: 10000件超えたら掃除)
+    if (_rateLimitStore.size > 10000) {
+        for (const [key, val] of _rateLimitStore.entries()) {
+            if (val.resetAt <= now) {
+                _rateLimitStore.delete(key);
+            }
+        }
+    }
+
+    let record = _rateLimitStore.get(ip);
+    if (!record || record.resetAt <= now) {
+        record = { count: 1, resetAt: now + windowMs };
+        _rateLimitStore.set(ip, record);
+        return {
+            allowed: true,
+            limit: max,
+            remaining: max - 1,
+            resetSeconds: Math.ceil(windowMs / 1000)
+        };
+    }
+
+    record.count++;
+    const remaining = Math.max(0, max - record.count);
+    const resetSeconds = Math.ceil((record.resetAt - now) / 1000);
+
+    if (record.count > max) {
+        return {
+            allowed: false,
+            limit: max,
+            remaining: 0,
+            resetSeconds
+        };
+    }
+
+    return {
+        allowed: true,
+        limit: max,
+        remaining,
+        resetSeconds
+    };
+}
+
+/**
+ * CORS 設定を適用し、OPTIONS プリフライトまたは通常レスポンスのヘッダーを構築
+ * @param {Request} req 
+ * @param {Object} serverConf 
+ * @returns {Headers|null}
+ */
+function getCorsHeaders(req, serverConf) {
+    const corsConf = serverConf.cors;
+    if (!corsConf || corsConf.enabled === false) return null;
+
+    const reqOrigin = req.headers.get('origin');
+    const headers = new Headers();
+
+    // Origin 判定
+    const allowedOrigins = corsConf.origin || corsConf.origins || '*';
+    let matchOrigin = null;
+
+    if (allowedOrigins === '*') {
+        matchOrigin = '*';
+    } else if (typeof allowedOrigins === 'string') {
+        if (allowedOrigins === reqOrigin) matchOrigin = reqOrigin;
+    } else if (Array.isArray(allowedOrigins)) {
+        if (allowedOrigins.includes('*') || (reqOrigin && allowedOrigins.includes(reqOrigin))) {
+            matchOrigin = reqOrigin || '*';
+        }
+    }
+
+    if (matchOrigin) {
+        headers.set('Access-Control-Allow-Origin', matchOrigin);
+        if (corsConf.credentials === true && matchOrigin !== '*') {
+            headers.set('Access-Control-Allow-Credentials', 'true');
+        }
+    }
+
+    const methods = corsConf.methods || ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'];
+    headers.set('Access-Control-Allow-Methods', Array.isArray(methods) ? methods.join(', ') : methods);
+
+    const allowHeaders = corsConf.headers || ['Content-Type', 'Authorization', 'X-Requested-With'];
+    headers.set('Access-Control-Allow-Headers', Array.isArray(allowHeaders) ? allowHeaders.join(', ') : allowHeaders);
+
+    if (corsConf.maxAge) {
+        headers.set('Access-Control-Max-Age', String(corsConf.maxAge));
+    }
+
+    return headers;
 }
 
 /**
@@ -341,6 +462,26 @@ async function executeJs(jsSource, context, options = {}) {
 async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     const startTime = Date.now();
     const serverConf = getServerConf(baseDir, frameworkDir);
+    const url = new URL(req.url);
+
+    // プロトコル & HTTPS 判定 (リバースプロキシヘッダー X-Forwarded-Proto 考慮)
+    const protocol = (req.headers.get('x-forwarded-proto') || url.protocol.replace(':', '') || 'http').toLowerCase();
+    const isSecure = protocol === 'https';
+
+    // CORS ヘッダーの生成
+    const corsHeaders = getCorsHeaders(req, serverConf);
+
+    // OPTIONS プリフライトの即時応答
+    if (req.method === 'OPTIONS' && corsHeaders) {
+        return new Response(null, {
+            status: 204,
+            headers: corsHeaders
+        });
+    }
+
+    // レートリミット判定 (クライアント IP 単位)
+    const clientIp = (req.headers.get('x-forwarded-for') ? req.headers.get('x-forwarded-for').split(',')[0].trim() : req.headers.get('x-real-ip')) || '127.0.0.1';
+    const rateCheck = checkRateLimit(clientIp, serverConf.rateLimit);
 
     // finalizeResponse: filter.after の実行とセキュリティヘッダーの自動付与を行うレスポンスラッパー
     let filterAfter = null;
@@ -358,10 +499,60 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
                 console.error('[maachang] filter.after error:', err);
             }
         }
-        return applySecurityHeaders(res, serverConf);
+
+        // CORS ヘッダーの付与
+        if (corsHeaders) {
+            const resHeaders = new Headers(res.headers);
+            for (const [k, v] of corsHeaders.entries()) {
+                if (!resHeaders.has(k)) {
+                    resHeaders.set(k, v);
+                }
+            }
+            res = new Response(res.body, {
+                status: res.status,
+                statusText: res.statusText,
+                headers: resHeaders
+            });
+        }
+
+        // レートリミットヘッダーの付与
+        if (rateCheck && rateCheck.limit !== undefined) {
+            const resHeaders = new Headers(res.headers);
+            resHeaders.set('X-RateLimit-Limit', String(rateCheck.limit));
+            resHeaders.set('X-RateLimit-Remaining', String(rateCheck.remaining));
+            resHeaders.set('X-RateLimit-Reset', String(rateCheck.resetSeconds));
+            res = new Response(res.body, {
+                status: res.status,
+                statusText: res.statusText,
+                headers: resHeaders
+            });
+        }
+
+        return applySecurityHeaders(res, serverConf, isSecure);
     };
 
-    const url = new URL(req.url);
+    // レートリミット超過時は 429 Too Many Requests
+    if (!rateCheck.allowed) {
+        const rateHeaders = new Headers({
+            'Content-Type': 'application/json; charset=utf-8',
+            'Retry-After': String(rateCheck.resetSeconds),
+            'X-RateLimit-Limit': String(rateCheck.limit),
+            'X-RateLimit-Remaining': String(rateCheck.remaining),
+            'X-RateLimit-Reset': String(rateCheck.resetSeconds)
+        });
+        if (corsHeaders) {
+            for (const [k, v] of corsHeaders.entries()) {
+                rateHeaders.set(k, v);
+            }
+        }
+        return applySecurityHeaders(new Response(JSON.stringify({
+            error: (serverConf.rateLimit && serverConf.rateLimit.message) || 'Too Many Requests'
+        }), {
+            status: 429,
+            headers: rateHeaders
+        }), serverConf, isSecure);
+    }
+
     // パストラバーサルおよび多重URLエンコードの対策
     let pathname = url.pathname;
     try {

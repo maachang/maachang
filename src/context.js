@@ -268,6 +268,26 @@ function loadEnv(baseDir) {
 }
 
 /**
+ * オブジェクトから危険なプロトタイプ汚染キー (__proto__, constructor, prototype) を再帰的に除去する
+ * @param {*} obj
+ * @returns {*}
+ */
+function sanitizeObject(obj) {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) {
+        return obj.map(sanitizeObject);
+    }
+    const clean = Object.create(null);
+    for (const key of Object.keys(obj)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+            continue;
+        }
+        clean[key] = sanitizeObject(obj[key]);
+    }
+    return Object.assign({}, clean);
+}
+
+/**
  * Cookie文字列をパースする
  * @param {string} cookieHeader 
  * @returns {Object}
@@ -279,9 +299,13 @@ function parseCookies(cookieHeader) {
     cookieHeader.split(';').forEach(cookie => {
         let [name, ...rest] = cookie.split('=');
         name = name?.trim();
-        if (!name) return;
+        if (!name || name === '__proto__' || name === 'constructor' || name === 'prototype') return;
         const value = rest.join('=').trim();
-        list[name] = decodeURIComponent(value);
+        try {
+            list[name] = decodeURIComponent(value);
+        } catch (_) {
+            list[name] = value;
+        }
     });
 
     return list;
@@ -335,8 +359,11 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
 
     const query = {};
     for (const [key, value] of url.searchParams.entries()) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
         query[key] = value;
     }
+
+    const sanitizedBody = sanitizeObject(body);
 
     const cookies = parseCookies(headers['cookie']);
     const clientIps = getClientIps(req, headers);
@@ -360,7 +387,7 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         method: req.method,
         headers,
         query,
-        body,
+        body: sanitizedBody,
         cookies,
         ip: clientIp,
         ips: clientIps,
@@ -431,7 +458,8 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
             if (opts.path) cookieStr += `; Path=${opts.path}`;
             else cookieStr += '; Path=/';
             if (opts.domain) cookieStr += `; Domain=${opts.domain}`;
-            if (opts.secure) cookieStr += '; Secure';
+            const isCookieSecure = opts.secure !== undefined ? !!opts.secure : isSecure;
+            if (isCookieSecure) cookieStr += '; Secure';
             if (opts.httpOnly !== false) cookieStr += '; HttpOnly';
             if (opts.sameSite) cookieStr += `; SameSite=${opts.sameSite}`;
             else cookieStr += '; SameSite=Lax';
@@ -712,5 +740,6 @@ module.exports = {
     loadEnv,
     stripJsonComments,
     parseJson,
-    isSafePath
+    isSafePath,
+    sanitizeObject
 };

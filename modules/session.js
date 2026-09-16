@@ -233,6 +233,50 @@ function cleanExpiredSessions() {
     return result.changes;
 }
 
+/**
+ * セッションIDを再生成する (セッション固定化攻撃対策)
+ * 既存のセッションデータを保持したまま新しいsidを発行し、Cookieを更新する
+ * @param {Object} $request
+ * @param {Object} $response
+ * @returns {{ sid: string, data: Object }|null}
+ */
+function regenerateSession($request, $response) {
+    const session = getSession($request);
+    const oldSid = session ? session.sid : null;
+    const currentData = session ? session.data : {};
+
+    const conf = getConf();
+    ensureTable(conf.dbPath);
+
+    const newSid = generateSid();
+    const now = Date.now();
+    const expiresAt = now + conf.timeoutMin * 60 * 1000;
+    const dataJson = JSON.stringify(currentData);
+
+    dbWrapper.transaction(() => {
+        if (oldSid) {
+            dbWrapper.run(`DELETE FROM sessions WHERE sid = ?`, [oldSid], conf.dbPath);
+        }
+        dbWrapper.run(
+            `INSERT INTO sessions (sid, data, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+            [newSid, dataJson, expiresAt, now, now],
+            conf.dbPath
+        );
+    });
+
+    if ($response && typeof $response.setCookie === 'function') {
+        $response.setCookie(conf.cookieName, newSid, {
+            maxAge: conf.timeoutMin * 60,
+            path: '/',
+            sameSite: conf.sameSite,
+            httpOnly: conf.httpOnly,
+            secure: conf.secure
+        });
+    }
+
+    return { sid: newSid, data: currentData };
+}
+
 module.exports = {
     getConf,
     getCookieSessionId,
@@ -240,5 +284,6 @@ module.exports = {
     getSession,
     setSession,
     deleteSession,
-    cleanExpiredSessions
+    cleanExpiredSessions,
+    regenerateSession
 };
