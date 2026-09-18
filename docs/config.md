@@ -66,7 +66,7 @@ const isDebug = process.env.DEBUG_MODE === 'true';
 
 | ファイル | 役割 | 主な設定項目 |
 |---|---|---|
-| `conf/server.json` | サーバー基本設定 | `host`, `port`, `cors`, `securityHeaders`, `healthCheck` |
+| `conf/server.json` | サーバー基本設定 | `host`, `port`, `maxBodyLength`, `rateLimit`, `cors`, `securityHeaders`, `csp`, `healthCheck` |
 | `conf/session.json` | セッション管理設定 | `dbPath`, `cookieName`, `expiresIn`, `secure`, `sameSite` |
 | `conf/env.json` | アプリケーション環境変数 | 任意のキー・バリュー（`process.env` に展開） |
 | `conf/log.json` | ロガー設定 | `dir`, `file`, `level`, `stdout` |
@@ -78,17 +78,45 @@ const isDebug = process.env.DEBUG_MODE === 'true';
 {
   "port": 3000,
   "hostname": "127.0.0.1",
-  // セキュリティヘッダー自動付与 (true / false または個別設定オブジェクト)
+
+  // 1. リクエストボディ上限サイズ (DoS対策: 超過時は 413 Payload Too Large を返却、デフォルト: 10MB)
+  "maxBodyLength": 10485760,
+
+  // 2. レートリミット (IP単位の過剰アクセス制限: 超過時は 429 Too Many Requests)
+  "rateLimit": {
+    "enabled": true,
+    "windowMs": 60000, // 監視時間 (ミリ秒)
+    "max": 100,        // 許容最大リクエスト数
+    "message": "Too Many Requests"
+  },
+
+  // 3. CORS 設定 (API サーバーとしてのクロスオリジン制御: OPTIONS プリフライトに 204 自動応答)
+  "cors": {
+    "enabled": true,
+    "origin": ["https://app.example.com"], // または "*"
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "headers": ["Content-Type", "Authorization"],
+    "credentials": true,
+    "maxAge": 86400
+  },
+
+  // 4. セキュリティヘッダー (デフォルトで有効。HTTPS時は Strict-Transport-Security を自動付与)
   "securityHeaders": {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "X-XSS-Protection": "1; mode=block",
-    "Referrer-Policy": "strict-origin-when-cross-origin"
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "hsts": true // HTTPS通信時に max-age=31536000; includeSubDomains を付与 (無効化は false)
   },
-  // ヘルスチェック死活監視 (/healthz)
+
+  // 5. CSP (Content-Security-Policy) の設定
+  "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+
+  // 6. ヘルスチェック死活監視 (/healthz)
   "healthCheck": {
     "enabled": true,
     "path": "/healthz"
   }
 }
 ```
+

@@ -397,48 +397,81 @@ Slack の Incoming Webhook または Bot Token (`chat.postMessage`) を利用し
 ```javascript
 const sendSlack = $loadLib('sendSlack.js');
 
-// 単純なテキスト通知
+// 1. Incoming Webhook による送信 (URL を第1引数に指定)
 await sendSlack.send(process.env.SLACK_WEBHOOK_URL, '新しい注文が入りました！');
 
 // リッチブロック通知
 await sendSlack.send(process.env.SLACK_WEBHOOK_URL, {
     text: 'システム警告',
-    blocks: [ ... ]
+    blocks: [ /* Block Kit 定義 */ ]
 });
+
+// 2. Bot Token によるチャンネル指定送信
+await sendSlack.send('#general', 'サーバー起動完了', {
+    token: process.env.SLACK_BOT_TOKEN,
+    userName: 'ServerBot',
+    icon: ':rocket:'
+});
+
+// 3. 複数行メッセージのバッファリング送信 (multi)
+const multi = sendSlack.multi('#dev-alerts');
+multi.setMessage('処理開始');
+multi.setMessage('ステップ1完了', 'ステップ2完了');
+await multi.flush();
 ```
 
 ---
 
 ### 16. `notification/sendGithub.js` (GitHub Issue 作成)
-GitHub Personal Access Token を用いて指定リポジトリに Issue を自動起票します。
+GitHub Personal Access Token を用いて指定リポジトリに Issue を自動起票します。オブジェクト形式・引数形式の双階に対応しています。
 
 ```javascript
 const sendGithub = $loadLib('sendGithub.js');
 
-await sendGithub.createIssue({
+// オブジェクト形式での起票
+const issue = await sendGithub.createIssue({
     owner: 'my-org',
     repo: 'my-repo',
     token: process.env.GITHUB_TOKEN,
     title: '[自動検知] サーバーエラー発生',
-    body: 'エラー詳細ログ...'
+    body: 'エラー詳細ログ...',
+    labels: ['bug', 'automated']
 });
+console.log('起票完了:', issue.url, issue.number);
+
+// 引数形式: (token, owner, repo, title, body, labels)
+// await sendGithub.createIssue(token, 'my-org', 'my-repo', title, body);
 ```
 
 ---
 
 ### 17. `http/multipart.js` (ファイルアップロード解析)
-`multipart/form-data` 形式のリクエストを解析し、アップロードされたファイルやテキストフィールドを抽出します。
+`multipart/form-data` 形式のリクエストボディを解析し、アップロードされたファイルやテキストフィールドを抽出します。
 
 ```javascript
 const multipart = $loadLib('multipart.js');
 
 // .mt.js 内でファイル受信
 exports.handler = async function() {
-    const parsed = await multipart.parse($request);
-    // parsed.fields: テキストフィールド { username: '...' }
-    // parsed.files: アップロードファイル一覧 [{ filename, data, contentType }]
-    
-    return { success: true, fileCount: parsed.files.length };
+    // $request().body() の生バッファと boundary からパース (戻り値: { [フィールド名]: 文字列 または { filename, contentType, data(Buffer) } })
+    const parsed = multipart.parse($request);
+
+    // テキストフィールド取得
+    const comment = parsed.comment; // 文字列
+
+    // ファイル取得
+    const avatar = parsed.avatar;
+    if (avatar) {
+        console.log('ファイル名:', avatar.filename);
+        console.log('MIMEタイプ:', avatar.contentType);
+        console.log('ファイルサイズ:', avatar.data.length, 'bytes');
+
+        // fileUtil を使って保存
+        const safeName = fileUtil.safeFileName(avatar.filename, ['png', 'jpg', 'webp'], 'avatar_');
+        await Bun.write(`./public/uploads/${safeName}`, avatar.data);
+    }
+
+    return { success: true };
 };
 ```
 

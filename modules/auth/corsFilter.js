@@ -31,9 +31,12 @@
     //         許可されていないOriginの場合はfalse.
     exports.apply = function (options) {
         options = options || {};
-        const req = $request();
-        const res = $response();
-        const origin = req.header("origin");
+        const req = options.request || (typeof $request === 'function' ? $request() : (typeof $request === 'object' ? $request : null));
+        const res = options.response || (typeof $response === 'function' ? $response() : (typeof $response === 'object' ? $response : null));
+        if (!req || !res) {
+            return false;
+        }
+        const origin = typeof req.header === 'function' ? req.header("origin") : (req.headers ? req.headers["origin"] : null);
 
         // Originヘッダーが無い場合は対象外(素通り).
         if (origin == null || origin === "") {

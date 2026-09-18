@@ -158,7 +158,7 @@
     //           getMessage: メッセージバッファ内容を取得します.
     //           useMessage: true の場合送信対象情報が存在します.
     //           (await)flush: メッセージバッファ内容を slackに出力します.
-    const send = function (channel, userName, icon, options, access_token) {
+    const multiSend = function (channel, userName, icon, options, access_token) {
         options = options || {}
         let msgBuffer = "";
         const ret = {};
@@ -212,12 +212,56 @@
         return ret;
     }
 
+    // 汎用送信メソッド.
+    // target Webhook URL (https://hooks.slack.com/...) または チャンネル名 (#channel)
+    // messageOrOptions 送信メッセージ文字列 または ペイロードオブジェクト ({ text, blocks 等 })
+    // options 送信オプション (userName, icon, access_token 等)
+    const send = async function (target, messageOrOptions, options = {}) {
+        if (!target) {
+            throw new Error("Target webhook URL or channel is required.");
+        }
+        // Webhook URL の場合 (https://...)
+        if (typeof target === 'string' && (target.startsWith('http://') || target.startsWith('https://'))) {
+            const payload = typeof messageOrOptions === 'string'
+                ? { text: messageOrOptions }
+                : (messageOrOptions || {});
+            const res = await fetch(target, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const text = await res.text();
+            let data = null;
+            try { data = JSON.parse(text); } catch (e) { data = text; }
+            return {
+                ok: res.ok && (data === 'ok' || (data && data.ok !== false)),
+                status: res.status,
+                data: data
+            };
+        }
+        // Slack App (Bot Token) チャンネル送信の場合
+        const channel = target;
+        const accessToken = options.token || options.access_token || options.accessToken;
+        if (typeof messageOrOptions === 'object' && messageOrOptions !== null && !Array.isArray(messageOrOptions)) {
+            return sendJSON(channel, messageOrOptions, accessToken);
+        }
+        return sendMessage(
+            channel,
+            messageOrOptions,
+            options.userName || options.username,
+            options.icon || options.icon_emoji,
+            options,
+            accessToken
+        );
+    };
+
     /////////////////////////////////////////////////////
     // 外部定義.
     /////////////////////////////////////////////////////
     exports.setEnvMainSlackToken = setEnvMainSlackToken;
+    exports.send = send;
     exports.message = sendMessage;
     exports.json = sendJSON;
-    exports.multi = send
+    exports.multi = multiSend;
 
 })();

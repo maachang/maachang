@@ -38,9 +38,11 @@
     }
 
     // githubRepogitoryに新しいissueを作成.
+    // 形式1: createIssue({ token, owner, repo, title, body, labels })
+    // 形式2: createIssue(token, oganization, repository, title, body, labels)
     // token 対象のTokenを設定します.
-    // oganization 組織契約しているrepositoryの場合は設定します.
-    // repository 対象のrepository名を設定します.
+    // oganization 組織契約しているrepositoryの場合は設定します (owner).
+    // repository 対象のrepository名を設定します (repo).
     // title issueタイトルを設定します.
     // body issueボディを設定します.
     // labels ラベル群をArray(string)で設定します.
@@ -51,13 +53,24 @@
     //         number: issueの番号.
     const createIssue = async function (
         token, oganization, repository, title, body, labels) {
+        // オブジェクト引数形式に対応
+        if (typeof token === 'object' && token !== null) {
+            const opts = token;
+            token = opts.token || opts.accessToken || process.env.GITHUB_TOKEN;
+            oganization = opts.organization || opts.owner || opts.org;
+            repository = opts.repository || opts.repo;
+            title = opts.title;
+            body = opts.body;
+            labels = opts.labels;
+        }
+
         // URLを生成.
         const url = _getURL(oganization, repository);
 
         // HTTPヘッダにトークンセット.
         const headers = {
             "Authorization": "token " + token,
-            "User-Agent": "minto/" + Date.now(),
+            "User-Agent": "maachang/" + Date.now(),
             "Accept": "application/vnd.github.v3+json",
             "Content-Type": "application/json"
         };
@@ -90,7 +103,7 @@
                 JSON.stringify(url, null, "  "));
         }
         // json返却値を取得.
-        const result = response.body();
+        const result = await response.body();
         return {
             url: result.html_url,
             title: result.title,
