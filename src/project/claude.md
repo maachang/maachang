@@ -110,12 +110,14 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`sessionMod.getSession($request)`**: セッションデータ取得（有効期限切れ時は自動削除＆`null` 返却）。
 - **`sessionMod.setSession(sid, data)`**: セッションデータ更新。
 - **`sessionMod.deleteSession($request, $response)`**: セッション削除 ＆ Cookie 破棄。
+- **`sessionMod.regenerateSession($request, $response)`**: セッション固定化攻撃対策（ログイン成功時にデータを保持したまま新しいセッションIDとCookieを安全に再発行）。
 - **`sessionMod.cleanExpiredSessions()`**: 期限切れセッションの一括クリーンアップ。
 
 ### 2. `logger.js` / `localLog.js`（日別ローテーションロガー）
 - **`logger.info(...)`, `logger.warn(...)`, `logger.error(...)`, `logger.debug(...)`, `logger.trace(...)`**:
   - `[YYYY-MM-DD HH:mm:ss.SSS] [LEVEL] メッセージ` 形式で標準出力および `./log/{file}.YYYY-MM-DD.log` へ出力。
 - **`logger.setting({ dir, file, level, stdout })`**: ログ設定変更（`conf/log.json` による自動設定にも対応）。
+- **`logger.maskSensitiveData(obj)`**: パスワードやトークン、Bearer ヘッダーなどの機密情報の自動マスキング。
 
 ### 3. `dateEx.js`（日付操作・フォーマット・期間判定ユーティリティ）
 - **`DateEx.create(...)` または `DateEx(...)`**: 日付インスタンス生成（文字列、数値、Date、DateEx から生成可能）。
@@ -124,11 +126,12 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`d.toString(mode, format)` / `d.toFormatString(pattern)`**: 日時フォーマット出力（`{yyyy}/{MM}/{dd}({dj}) {hh}:{mm}:{ss}` 等）。
 - **`DateEx.between(date, mode).isBetween(target)`**: 月始・月末などの期間取得および範囲内外判定。
 
-### 4. `password.js` / `jwt.js` / `csrf.js` / `rbac.js`（セキュリティ・認証）
+### 4. `password.js` / `jwt.js` / `csrf.js` / `rbac.js` / `corsFilter.js`（セキュリティ・認証・認可）
 - **`password.hash(pwd)` / `password.verify(pwd, hashed)`**: PBKDF2-HMAC-SHA256 による安全なパスワードハッシュ化・照合。
 - **`jwt.sign(payload, secret, opt)` / `jwt.verify(token, secret)`**: HS256 による JWT トークン署名・検証。
-- **`csrf.generateToken(sid?)` / `csrf.verify(sid?, token?)`**: セッション連携 CSRF トークン生成・検証。
-- **`rbac.hasRole(role, target)` / `rbac.hasPermission(role, perm)`**: ロール・権限の検証およびルート保護。
+- **`csrf.generateToken(sid?)` / `csrf.verify(sid?, token?)` / `csrf.verify(req)`**: セッション連携 CSRF トークン生成・検証。
+- **`rbac.hasRole(user, role)` / `rbac.can(user, permission)` / `rbac.create(config)`**: ロールベース認可（階層継承 `inherits` およびワイルドカード `*` 認可）。
+- **`corsFilter.apply(options)`**: `filter.mt.js` 等で利用する CORS 制御ヘルパー（許可オリジン判定、OPTIONS プリフライト対応、資格情報ヘッダー付与）。
 
 ### 5. `csvReader.js` / `csvWriter.js`（CSV 操作）
 - **`csvWriter.writeCsv(headers, rows)`**: 配列/オブジェクトデータから CSV 文字列を生成。
@@ -182,9 +185,11 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
   - `default`: 未指定時の補完値または生成関数
   - `messages`: ルール別カスタムエラーメッセージ (`{ required: '...', mail: '...', range: '...' }`)
 
-### 7. `sendSlack.js` / `multipart.js`（通信・ファイルアップロード）
-- **`sendSlack.send(webhookUrl, message)`**: Slack Webhook への通知送信。
-- **`multipart.parse(req)`**: `multipart/form-data` によるファイルアップロードの解析。
+### 7. `sendSlack.js` / `sendGithub.js` / `multipart.js`（通信・ファイルアップロード・通知）
+- **`sendSlack.send(target, messageOrOptions, options)`**: Slack Incoming Webhook（URL指定）または Bot Token（`#channel` 指定）による通知送信。
+- **`sendSlack.multi(channel)`**: 複数メッセージのバッファリング一括送信オブジェクトの取得。
+- **`sendGithub.createIssue({ owner, repo, token, title, body, labels })`**: GitHub Personal Access Token による Issue 自動起票。
+- **`multipart.parse($request)`**: `multipart/form-data` リクエストボディの生バッファを解析（戻り値: `{ [field]: string | { filename, contentType, data(Buffer) } }`）。DoS保護として `conf/server.json` の `maxBodyLength`（デフォルト: 10MB）が事前に適用されます。
 
 ### 8. `format.js` / `encrypt.js` / `http.js`（整形・暗号化・HTTPクライアント）
 - **`format.money(val)` / `format.parseMoney(str)` / `format.toHalfWidth(str)` / `format.bytes(n)` / `format.mask(str)` / `format.truncate(str, len)`**: 日本語業務画面向けフォーマット（金額相互変換・全角半角等）。
