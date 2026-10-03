@@ -17,10 +17,18 @@
     const _getSession = function () {
         if (_session == null) {
             try {
-                _session = $loadLib("session.js");
+                if (typeof $loadLib === "function") {
+                    _session = $loadLib("session.js");
+                }
             } catch (e) {
-                // セッション未構成の場合はnull
                 _session = null;
+            }
+            if (!_session) {
+                try {
+                    _session = typeof $require === 'function' ? $require('./session.js') : require('../session.js');
+                } catch (_) {
+                    _session = null;
+                }
             }
         }
         return _session;
@@ -166,13 +174,22 @@
         };
 
         // セッションから現在のログインユーザーを取得.
-        const getUser = async function () {
+        const getUser = async function (customReq) {
             const sess = _getSession();
             if (!sess) return null;
             try {
-                const sessionData = await sess.getCookie();
-                if (!sessionData) return null;
-                return sessionData;
+                const req = customReq || (typeof $request === 'function' ? $request() : (typeof $request === 'object' ? $request : null));
+                if (typeof sess.getSession === 'function') {
+                    const sessionObj = sess.getSession(req);
+                    if (!sessionObj) return null;
+                    return sessionObj.data || sessionObj;
+                }
+                if (typeof sess.getCookie === 'function') {
+                    const sessionData = await sess.getCookie(req);
+                    if (!sessionData) return null;
+                    return sessionData.data || sessionData;
+                }
+                return null;
             } catch (e) {
                 return null;
             }
@@ -277,18 +294,18 @@
                 if (isNotLoggedIn) {
                     const loginUrl = options.loginUrl || conf.loginUrl;
                     if (loginUrl) {
-                        res.redirect(loginUrl, null, 302);
+                        res.redirect(loginUrl, 302);
                         return false;
                     }
-                    res.status(401, "Unauthorized");
+                    res.status(401);
                     res.body({ error: "Unauthorized", message: "Login required" });
                 } else {
                     const forbiddenUrl = options.forbiddenUrl || conf.forbiddenUrl;
                     if (forbiddenUrl) {
-                        res.redirect(forbiddenUrl, null, 302);
+                        res.redirect(forbiddenUrl, 302);
                         return false;
                     }
-                    res.status(403, "Forbidden");
+                    res.status(403);
                     res.body({ error: "Forbidden", message: "Access denied" });
                 }
             }
@@ -302,7 +319,7 @@
             options = options || {};
             let user = options.user;
             if (!user) {
-                user = await getUser();
+                user = await getUser(options.req || options.request);
             }
 
             if (!user) {
@@ -336,7 +353,7 @@
             options = options || {};
             let user = options.user;
             if (!user) {
-                user = await getUser();
+                user = await getUser(options.req || options.request);
             }
 
             if (!user) {

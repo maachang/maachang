@@ -318,6 +318,12 @@
         const result = Object.assign({}, data);
         const errors = [];
         for (let field in schema) {
+            if (field === '__proto__' || field === 'constructor' || field === 'prototype') {
+                continue;
+            }
+            if (!Object.prototype.hasOwnProperty.call(schema, field)) {
+                continue;
+            }
             const hasValue = Object.prototype.hasOwnProperty.call(data, field);
             const ret = _checkField(field, schema[field], data[field], hasValue, data);
             if (ret.error != null) {

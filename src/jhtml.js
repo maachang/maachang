@@ -120,6 +120,8 @@ const indentEnter = function (s) {
     for (let i = 0; i < len; i++) {
         if ((c = s[i]) == "\n") {
             ret += "\\n";
+        } else if (c == "\r") {
+            ret += "\\r";
         } else {
             ret += c;
         }

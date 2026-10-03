@@ -72,7 +72,9 @@ function applySecurityHeaders(response, serverConf = {}, isSecure = false) {
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY',
         'X-XSS-Protection': '1; mode=block',
-        'Referrer-Policy': 'strict-origin-when-cross-origin'
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'X-Permitted-Cross-Domain-Policies': 'none',
+        'Cross-Origin-Opener-Policy': 'same-origin'
     };
 
     // HTTPS 接続時の HSTS (Strict-Transport-Security)
@@ -268,7 +270,23 @@ function isSafePath(baseDir, targetFile) {
         const resolvedBase = path.resolve(baseDir);
         const resolvedTarget = path.resolve(targetFile);
         const rel = path.relative(resolvedBase, resolvedTarget);
-        return !rel.startsWith('..') && !path.isAbsolute(rel);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+            return false;
+        }
+        // シンボリックリンクによるディレクトリ脱出を防止 (実パスを検証)
+        let checkPath = resolvedTarget;
+        while (!fs.existsSync(checkPath) && checkPath !== resolvedBase && path.dirname(checkPath) !== checkPath) {
+            checkPath = path.dirname(checkPath);
+        }
+        if (fs.existsSync(checkPath)) {
+            const realBase = fs.realpathSync(resolvedBase);
+            const realCheck = fs.realpathSync(checkPath);
+            const realRel = path.relative(realBase, realCheck);
+            if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+                return false;
+            }
+        }
+        return true;
     } catch (_) {
         return false;
     }
@@ -480,7 +498,20 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
     }
 
     // レートリミット判定 (クライアント IP 単位)
-    const clientIp = (req.headers.get('x-forwarded-for') ? req.headers.get('x-forwarded-for').split(',')[0].trim() : req.headers.get('x-real-ip')) || '127.0.0.1';
+    const IP_REGEX = /^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-fA-F0-9:]+$/;
+    let clientIp = '127.0.0.1';
+    if (serverConf.trustProxy !== false) {
+        const xff = req.headers.get('x-forwarded-for');
+        const xri = req.headers.get('x-real-ip');
+        if (xff) {
+            clientIp = xff.split(',')[0].trim();
+        } else if (xri) {
+            clientIp = xri.trim();
+        }
+    }
+    if (!IP_REGEX.test(clientIp)) {
+        clientIp = '127.0.0.1';
+    }
     const rateCheck = checkRateLimit(clientIp, serverConf.rateLimit);
 
     // finalizeResponse: filter.after の実行とセキュリティヘッダーの自動付与を行うレスポンスラッパー
@@ -613,13 +644,18 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
             }
         } catch (e) {}
 
-        return finalizeResponse(new Response(JSON.stringify({
+        const isDetailed = healthConf.detailed !== undefined ? !!healthConf.detailed : isDev;
+        const payload = {
             status: 'ok',
             uptime: Math.floor(process.uptime()),
-            timestamp: Date.now(),
-            memory: process.memoryUsage(),
-            version: pkgVersion
-        }), {
+            timestamp: Date.now()
+        };
+        if (isDetailed) {
+            payload.memory = process.memoryUsage();
+            payload.version = pkgVersion;
+        }
+
+        return finalizeResponse(new Response(JSON.stringify(payload), {
             status: 200,
             headers: { 'Content-Type': 'application/json; charset=utf-8' }
         }));
@@ -675,8 +711,18 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
                 const formData = await req.formData();
                 parsedBody = {};
                 for (const [key, value] of formData.entries()) {
+                    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
                     parsedBody[key] = value;
                 }
+            } else if (contentType.includes('multipart/form-data')) {
+                const arrayBuffer = await req.arrayBuffer();
+                if (arrayBuffer.byteLength > maxBodyLength) {
+                    return finalizeResponse(new Response(JSON.stringify({ error: 'Payload Too Large' }), {
+                        status: 413,
+                        headers: { 'Content-Type': 'application/json; charset=utf-8' }
+                    }));
+                }
+                parsedBody = Buffer.from(arrayBuffer);
             } else {
                 const text = await req.text();
                 if (text.length > maxBodyLength) {

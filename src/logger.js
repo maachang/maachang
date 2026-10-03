@@ -147,7 +147,7 @@ function setting(options = {}) {
     _isInitialized = true;
 }
 
-const SENSITIVE_KEY_REGEX = /^(password|passwd|secret|token|apikey|api_key|credit_card|card_number|authorization|auth)$/i;
+const SENSITIVE_KEY_REGEX = /(password|passwd|secret|token|apikey|api_key|credit_card|card_number|authorization|auth|credential|private_key|privatekey|session_id|sessionid)/i;
 
 /**
  * 機密データ（パスワード、トークン、秘密鍵等）を再帰的にマスキングする
@@ -160,7 +160,7 @@ function maskSensitiveData(data) {
         // Authorization: Bearer <token>
         let masked = data.replace(/(Bearer\s+)[A-Za-z0-9\-._~+/]+=*/gi, '$1***');
         // JSON 形式またはクエリ形式のキー: "password": "value", password=value
-        masked = masked.replace(/("?(?:password|passwd|secret|token|apiKey|api_key)"?\s*[:=]\s*)"([^"]+)"/gi, '$1"***"');
+        masked = masked.replace(/("?(?:password|passwd|secret|token|apiKey|api_key|access_token|refresh_token|client_secret|private_key)"?\s*[:=]\s*)"([^"]+)"/gi, '$1"***"');
         return masked;
     }
     if (Array.isArray(data)) {

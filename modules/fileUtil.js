@@ -398,8 +398,9 @@ function safeFileName(originalName, allowedExts = null, prefix = '') {
         throw new Error('ファイル名が空です');
     }
 
-    // パストラバーサル防止 (ディレクトリパスを除去)
-    const baseName = path.basename(String(originalName)).trim();
+    // パストラバーサルおよびNullバイトインジェクション防止
+    const sanitized = String(originalName).replace(/\0/g, '').replace(/\\/g, '/');
+    const baseName = path.basename(sanitized).trim();
     const ext = getExt(baseName);
 
     if (allowedExts && Array.isArray(allowedExts)) {

@@ -55,8 +55,17 @@
     // b 比較対象の文字列を設定します.
     // 戻り値: 一致する場合true.
     const _timingSafeEqual = function (a, b) {
-        if (typeof a != "string" || typeof b != "string" ||
-            a.length != b.length) {
+        if (typeof a != "string" || typeof b != "string") {
+            return false;
+        }
+        try {
+            const bufA = Buffer.from(a, "utf-8");
+            const bufB = Buffer.from(b, "utf-8");
+            if (bufA.length === bufB.length && typeof crypto.timingSafeEqual === "function") {
+                return crypto.timingSafeEqual(bufA, bufB);
+            }
+        } catch (_) {}
+        if (a.length != b.length) {
             return false;
         }
         let diff = 0;
@@ -84,6 +93,9 @@
     //                    用途に応じた値を明示的に指定すること).
     // 戻り値: JWTトークン文字列が返却されます.
     exports.sign = function (payload, secret, options) {
+        if (secret == null || typeof secret !== "string" || secret === "") {
+            throw new Error("secret must be a non-empty string.");
+        }
         if (options == undefined || options.expiresIn == undefined) {
             throw new Error("options.expiresIn is required.");
         }
@@ -114,6 +126,9 @@
             options = {};
         }
         try {
+            if (secret == null || typeof secret !== "string" || secret === "") {
+                throw new Error("secret must be a non-empty string.");
+            }
             if (typeof token != "string") {
                 throw new Error("token must be a string.");
             }
@@ -121,17 +136,23 @@
             if (parts.length != 3) {
                 throw new Error("Invalid JWT format.");
             }
+            // ヘッダーのアルゴリズムを検証 (HS256 以外の不正なアルゴリズムや "none" 攻撃を遮断)
+            const header = JSON.parse(_base64urlDecode(parts[0]).toString("utf-8"));
+            if (!header || header.alg !== "HS256") {
+                throw new Error("Unsupported JWT algorithm: " + (header ? header.alg : "unknown"));
+            }
             const headerPayload = parts[0] + "." + parts[1];
             const expectSign = _sign(headerPayload, secret);
             if (!_timingSafeEqual(expectSign, parts[2])) {
                 throw new Error("JWT signature mismatch.");
             }
             const payload = JSON.parse(_base64urlDecode(parts[1]).toString("utf-8"));
-            if (payload.exp != undefined) {
-                const nowSec = Math.floor(Date.now() / 1000);
-                if (nowSec >= payload.exp) {
-                    throw new Error("JWT expired.");
-                }
+            const nowSec = Math.floor(Date.now() / 1000);
+            if (payload.nbf != undefined && nowSec < payload.nbf) {
+                throw new Error("JWT not active yet.");
+            }
+            if (payload.exp != undefined && nowSec >= payload.exp) {
+                throw new Error("JWT expired.");
             }
             return payload;
         } catch (e) {

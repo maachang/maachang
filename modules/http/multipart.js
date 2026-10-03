@@ -19,6 +19,8 @@
 (function () {
     'use strict';
 
+    const path = typeof $require === 'function' ? $require('path') : require('node:path');
+
     // content-typeヘッダーからboundaryを取得します.
     // 戻り値: boundary文字列。multipart/form-data以外、または
     //         boundary未指定の場合はnull.
@@ -76,14 +78,16 @@
             return;
         }
         const name = _extractParam(disposition, "name");
-        if (name == null) {
+        if (name == null || name === "__proto__" || name === "constructor" || name === "prototype") {
             return;
         }
         const data = part.subarray(headerEnd + 4);
         const filename = _extractParam(disposition, "filename");
         if (filename != null) {
+            // パストラバーサル防止 & Nullバイト除去
+            const cleanFilename = path.basename(filename.replace(/\0/g, '').replace(/\\/g, '/')).trim();
             result[name] = {
-                filename: filename,
+                filename: cleanFilename || "upload.bin",
                 contentType: headers["content-type"] || "application/octet-stream",
                 data: data
             };
@@ -91,6 +95,9 @@
             result[name] = data.toString("utf-8");
         }
     };
+
+    // 最大パート数 (DoS対策)
+    const _MAX_PARTS = 1000;
 
     // bodyをboundaryで分割し、各パートをパースします.
     const _parseBody = function (body, boundary) {
@@ -101,7 +108,9 @@
             return result;
         }
         pos += delim.length;
-        while (true) {
+        let partCount = 0;
+        while (partCount < _MAX_PARTS) {
+            partCount++;
             // 終端境界("--boundary--")の判定.
             if (body[pos] === 0x2d && body[pos + 1] === 0x2d) {
                 break;
@@ -131,12 +140,22 @@
     //         のオブジェクト。multipart/form-data以外、またはboundary
     //         未指定の場合は空オブジェクト{}.
     exports.parse = function (request) {
-        const boundary = _getBoundary(request.header("content-type"));
+        if (!request) return {};
+        const getH = typeof request.header === 'function' ? request.header.bind(request) :
+                     (typeof request.getHeader === 'function' ? request.getHeader.bind(request) :
+                     (k) => (request.headers ? request.headers[k.toLowerCase()] : null));
+        const contentType = getH("content-type");
+        const boundary = _getBoundary(contentType);
         if (boundary == null) {
             return {};
         }
-        const body = request.body();
-        if (body == null || body.length === 0) {
+        let body = typeof request.body === 'function' ? request.body() : request.body;
+        if (body == null) {
+            return {};
+        }
+        if (typeof body === 'string') {
+            body = Buffer.from(body, 'latin1');
+        } else if (!Buffer.isBuffer(body) && !(body instanceof Uint8Array)) {
             return {};
         }
         return _parseBody(body, boundary);

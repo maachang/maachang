@@ -64,13 +64,21 @@
     // keyLen 導出する鍵長(バイト)を設定します(デフォルト32).
     // 戻り値: hex文字列の導出結果が返却されます.
     const derive = function (password, salt, iterations, keyLen) {
+        if (typeof password !== 'string' || typeof salt !== 'string') {
+            return '';
+        }
         iterations = iterations | 0;
         if (iterations <= 0) {
             iterations = _DEFAULT_ITERATIONS;
+        } else if (iterations > 200000) {
+            // 反復回数が異常に大きい場合の DoS を防止 (上限20万回)
+            iterations = 200000;
         }
         keyLen = keyLen | 0;
         if (keyLen <= 0) {
             keyLen = _DEFAULT_KEY_LEN;
+        } else if (keyLen > 1024) {
+            keyLen = 1024;
         }
         const saltBuf = Buffer.from(salt, "hex");
         const blocks = Math.ceil(keyLen / _HASH_LEN);
@@ -86,8 +94,17 @@
     // b 比較対象の文字列を設定します.
     // 戻り値: 一致する場合true.
     const _timingSafeEqual = function (a, b) {
-        if (typeof a != "string" || typeof b != "string" ||
-            a.length != b.length) {
+        if (typeof a != "string" || typeof b != "string") {
+            return false;
+        }
+        try {
+            const bufA = Buffer.from(a, "utf-8");
+            const bufB = Buffer.from(b, "utf-8");
+            if (bufA.length === bufB.length && typeof crypto.timingSafeEqual === "function") {
+                return crypto.timingSafeEqual(bufA, bufB);
+            }
+        } catch (_) {}
+        if (a.length != b.length) {
             return false;
         }
         let diff = 0;
@@ -104,6 +121,9 @@
     // 戻り値: {salt, hash, iterations} が返却されます.
     //         この内容をそのまま保存し、verify() に渡してください.
     exports.hash = function (password, iterations) {
+        if (typeof password !== 'string') {
+            throw new TypeError('Password must be a string');
+        }
         iterations = iterations | 0;
         if (iterations <= 0) {
             iterations = _DEFAULT_ITERATIONS;
@@ -118,10 +138,10 @@
     // stored hash() で生成した {salt, hash, iterations} を設定します.
     // 戻り値: 一致する場合true.
     exports.verify = function (password, stored) {
-        if (stored == null || stored.salt == null || stored.hash == null) {
+        if (typeof password !== 'string' || stored == null || typeof stored.salt !== 'string' || typeof stored.hash !== 'string') {
             return false;
         }
-        const iterations = stored.iterations || _DEFAULT_ITERATIONS;
+        const iterations = (typeof stored.iterations === 'number' && stored.iterations > 0) ? stored.iterations : _DEFAULT_ITERATIONS;
         const check = derive(password, stored.salt, iterations);
         return _timingSafeEqual(check, stored.hash);
     };

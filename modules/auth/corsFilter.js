@@ -67,7 +67,7 @@
             options.methods || _DEFAULT_METHODS);
         res.header("access-control-allow-headers",
             options.headers || _DEFAULT_HEADERS);
-        if (options.credentials === true) {
+        if (options.credentials === true && allowOrigin !== "*") {
             res.header("access-control-allow-credentials", "true");
         }
         return true;

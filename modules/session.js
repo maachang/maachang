@@ -68,6 +68,8 @@ function ensureTable(dbPath) {
     _isTableInitialized = true;
 }
 
+const SID_REGEX = /^[0-9a-fA-F]{32,128}$/;
+
 /**
  * ランダムなセッションID (32バイト hex) を生成
  * @returns {string}
@@ -84,11 +86,14 @@ function generateSid() {
 function getCookieSessionId($request) {
     if (!$request) return null;
     const conf = getConf();
+    let sid = null;
     if (typeof $request.getCookie === 'function') {
-        return $request.getCookie(conf.cookieName);
+        sid = $request.getCookie(conf.cookieName);
+    } else if ($request.cookies && $request.cookies[conf.cookieName]) {
+        sid = $request.cookies[conf.cookieName];
     }
-    if ($request.cookies && $request.cookies[conf.cookieName]) {
-        return $request.cookies[conf.cookieName];
+    if (sid && SID_REGEX.test(sid)) {
+        return sid;
     }
     return null;
 }
@@ -115,13 +120,16 @@ function createSession($response, initialData = {}) {
     );
 
     if ($response && typeof $response.setCookie === 'function') {
-        $response.setCookie(conf.cookieName, sid, {
+        const cookieOpts = {
             maxAge: conf.timeoutMin * 60,
             path: '/',
             sameSite: conf.sameSite,
-            httpOnly: conf.httpOnly,
-            secure: conf.secure
-        });
+            httpOnly: conf.httpOnly
+        };
+        if (conf.secure === true) {
+            cookieOpts.secure = true;
+        }
+        $response.setCookie(conf.cookieName, sid, cookieOpts);
     }
 
     return { sid, data: initialData };
@@ -172,7 +180,7 @@ function getSession($request) {
  * @returns {boolean}
  */
 function setSession(sid, data, extendTimeout = true) {
-    if (!sid) return false;
+    if (!sid || !SID_REGEX.test(sid)) return false;
 
     const conf = getConf();
     ensureTable(conf.dbPath);
@@ -210,7 +218,15 @@ function deleteSession($request, $response) {
     const conf = getConf();
 
     if ($response && typeof $response.deleteCookie === 'function') {
-        $response.deleteCookie(conf.cookieName, { path: '/' });
+        const deleteOpts = {
+            path: '/',
+            sameSite: conf.sameSite,
+            httpOnly: conf.httpOnly
+        };
+        if (conf.secure === true) {
+            deleteOpts.secure = true;
+        }
+        $response.deleteCookie(conf.cookieName, deleteOpts);
     }
 
     if (!sid) return false;
@@ -265,13 +281,16 @@ function regenerateSession($request, $response) {
     });
 
     if ($response && typeof $response.setCookie === 'function') {
-        $response.setCookie(conf.cookieName, newSid, {
+        const cookieOpts = {
             maxAge: conf.timeoutMin * 60,
             path: '/',
             sameSite: conf.sameSite,
-            httpOnly: conf.httpOnly,
-            secure: conf.secure
-        });
+            httpOnly: conf.httpOnly
+        };
+        if (conf.secure === true) {
+            cookieOpts.secure = true;
+        }
+        $response.setCookie(conf.cookieName, newSid, cookieOpts);
     }
 
     return { sid: newSid, data: currentData };

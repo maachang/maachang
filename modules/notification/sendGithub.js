@@ -8,19 +8,21 @@
 
     // issue作成対象のURLを取得.
     const _getURL = function (oganization, repository) {
+        const repo = encodeURIComponent(String(repository || '').trim());
         let path;
         if (oganization == undefined || oganization == null ||
             oganization == "") {
-            path = "repos/" + repository + "/issues";
+            path = "repos/" + repo + "/issues";
         } else {
-            path = "repos/" + oganization +
-                "/" + repository + "/issues";
+            const org = encodeURIComponent(String(oganization).trim());
+            path = "repos/" + org +
+                "/" + repo + "/issues";
         }
         return {
             host: "api.github.com",
             path: path
-        }
-    }
+        };
+    };
 
     // [(await)httpClient]POSTリクエスト実行.
     const _requetPost = async function (host, path, options) {

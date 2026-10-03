@@ -28,7 +28,23 @@ function isSafePath(baseDir, targetFile) {
         const resolvedBase = path.resolve(baseDir);
         const resolvedTarget = path.resolve(targetFile);
         const rel = path.relative(resolvedBase, resolvedTarget);
-        return !rel.startsWith('..') && !path.isAbsolute(rel);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+            return false;
+        }
+        // シンボリックリンクによるディレクトリ脱出を防止 (実パスを検証)
+        let checkPath = resolvedTarget;
+        while (!fs.existsSync(checkPath) && checkPath !== resolvedBase && path.dirname(checkPath) !== checkPath) {
+            checkPath = path.dirname(checkPath);
+        }
+        if (fs.existsSync(checkPath)) {
+            const realBase = fs.realpathSync(resolvedBase);
+            const realCheck = fs.realpathSync(checkPath);
+            const realRel = path.relative(realBase, realCheck);
+            if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+                return false;
+            }
+        }
+        return true;
     } catch (_) {
         return false;
     }
@@ -274,6 +290,7 @@ function loadEnv(baseDir) {
  */
 function sanitizeObject(obj) {
     if (obj === null || typeof obj !== 'object') return obj;
+    if (Buffer.isBuffer(obj) || obj instanceof Uint8Array) return obj;
     if (Array.isArray(obj)) {
         return obj.map(sanitizeObject);
     }
@@ -311,6 +328,8 @@ function parseCookies(cookieHeader) {
     return list;
 }
 
+const IP_REGEX = /^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-fA-F0-9:]+$/;
+
 /**
  * クライアントのIPアドレス一覧を取得 (Nginx等のリバースプロキシを考慮)
  * @param {Request} req 
@@ -319,10 +338,12 @@ function parseCookies(cookieHeader) {
  */
 function getClientIps(req, headers) {
     if (headers['x-forwarded-for']) {
-        return headers['x-forwarded-for'].split(',').map(s => s.trim()).filter(Boolean);
+        const list = headers['x-forwarded-for'].split(',').map(s => s.trim()).filter(s => s && IP_REGEX.test(s));
+        if (list.length > 0) return list;
     }
     if (headers['x-real-ip']) {
-        return [headers['x-real-ip'].trim()];
+        const ip = headers['x-real-ip'].trim();
+        if (IP_REGEX.test(ip)) return [ip];
     }
     return ['127.0.0.1'];
 }
@@ -396,9 +417,12 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         host,
         baseUrl,
         // ヘルパーメソッド
-        getHeader: (k) => headers[k.toLowerCase()],
+        getHeader: (k) => headers[k ? k.toLowerCase() : ''],
+        header: (k) => headers[k ? k.toLowerCase() : ''],
         getQuery: (k, def = null) => (query[k] !== undefined ? query[k] : def),
         getCookie: (k, def = null) => (cookies[k] !== undefined ? cookies[k] : def),
+        cookie: (k, def = null) => (cookies[k] !== undefined ? cookies[k] : def),
+        getBody: () => sanitizedBody,
         params: () => query
     };
 
@@ -503,8 +527,12 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
             _isHandled = true;
             return _responseBody;
         },
-        redirect: function (location, statusCode = 302) {
-            _status = statusCode;
+        redirect: function (location, statusCode) {
+            let code = statusCode;
+            if (typeof code !== 'number' || isNaN(code) || code < 200 || code > 599) {
+                code = 302;
+            }
+            _status = code;
             _responseHeaders.set('Location', location);
             _responseBody = '';
             _isHandled = true;

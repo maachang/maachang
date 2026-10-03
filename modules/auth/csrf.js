@@ -26,14 +26,21 @@
 
     // [環境変数]CSRFトークン署名用シークレット.
     let _warnedDefaultSecret = false;
+    let _ephemeralSecret = null;
     const _SECRET_ENV = "CSRF_SECRET";
     const _getSecret = function () {
         const ret = process.env[_SECRET_ENV];
         if (ret == undefined || ret == null || ret === "") {
             const isProd = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
-            if (isProd && !_warnedDefaultSecret) {
-                console.warn("[SECURITY WARNING] CSRF_SECRET environment variable is not set in production. Using default secret is dangerous. Please set CSRF_SECRET.");
-                _warnedDefaultSecret = true;
+            if (isProd) {
+                if (!_warnedDefaultSecret) {
+                    console.warn("[SECURITY WARNING] CSRF_SECRET environment variable is not set in production. Generating an ephemeral random secret for this process instance. Please set CSRF_SECRET.");
+                    _warnedDefaultSecret = true;
+                }
+                if (!_ephemeralSecret) {
+                    _ephemeralSecret = crypto.randomBytes(32).toString('hex');
+                }
+                return _ephemeralSecret;
             }
             return "minto-default-csrf-secret";
         }
@@ -60,7 +67,7 @@
             req = $request;
         }
         if (!req) return null;
-        const name = process.env[_COOKIE_SESSION_NAME_ENV] || "maachang_sid";
+        const name = process.env.MAACHANG_COOKIE_SESSION_NAME || process.env[_COOKIE_SESSION_NAME_ENV] || "maachang_sid";
         return (typeof req.cookie === 'function' ? req.cookie(name) : (typeof req.getCookie === 'function' ? req.getCookie(name) : (req.cookies ? req.cookies[name] : null)));
     };
 
@@ -72,8 +79,17 @@
 
     // タイミング攻撃を避けるための定数時間文字列比較.
     const _timingSafeEqual = function (a, b) {
-        if (typeof a != "string" || typeof b != "string" ||
-            a.length != b.length) {
+        if (typeof a != "string" || typeof b != "string") {
+            return false;
+        }
+        try {
+            const bufA = Buffer.from(a, "utf-8");
+            const bufB = Buffer.from(b, "utf-8");
+            if (bufA.length === bufB.length && typeof crypto.timingSafeEqual === "function") {
+                return crypto.timingSafeEqual(bufA, bufB);
+            }
+        } catch (_) {}
+        if (a.length != b.length) {
             return false;
         }
         let diff = 0;

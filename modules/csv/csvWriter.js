@@ -14,16 +14,24 @@
         }, {});
     };
 
+    const FORMULA_PREFIX_REGEX = /^[=+\-@\t\r]/;
+
     // 出力内容によっては ダブルクォーテーション を付与する.
     // parseCode CSV区切り文字を設定します.
     // value １つのColumnValueを設定します.
+    // sanitizeFormulas 数式インジェクション防止フラグ
     // 戻り値: 変換されたColumnValueが返却されます.
-    const outValue = (parseCode, value) => {
+    const outValue = (parseCode, value, sanitizeFormulas = false) => {
         if (value == null) { // null と undefined を同時にチェック
             return "";
         }
 
         let strValue = String(value);
+
+        // CSV インジェクション (数式実行) 対策: =, +, -, @, タブ, CR で始まる文字列の先頭に ' を付与
+        if (sanitizeFormulas && FORMULA_PREFIX_REGEX.test(strValue)) {
+            strValue = "'" + strValue;
+        }
 
         // ダブルクォーテーション、区切り文字、またはタブや改行が含まれている場合
         if (strValue.includes('"') || strValue.includes(parseCode) || strValue.includes('\t') ||
@@ -63,6 +71,7 @@
         const parseCode = options.parseCode || ",";
         const convertFunc = typeof options.convertFunc === "function" ? options.convertFunc : defaultConvertFunc;
         const lineBreak = options.lineBreak || "\n"; // 改行コードもオプション化
+        const sanitizeFormulas = options.sanitizeFormulas === true || options.preventInjection === true;
 
         const headerLength = headers.length;
         const headerKeys = createHeaderKeys(headers);
@@ -76,7 +85,7 @@
 
         // ヘッダ書き込み.
         const _writeHeader = () => {
-            const headerRow = headers.map(h => outValue(parseCode, h)).join(parseCode);
+            const headerRow = headers.map(h => outValue(parseCode, h, sanitizeFormulas)).join(parseCode);
             lines.push(headerRow);
         };
 
@@ -108,7 +117,7 @@
 
         // 現在の行情報を出力.
         ret.next = () => {
-            const rowStr = oneLine.map(val => outValue(parseCode, val)).join(parseCode);
+            const rowStr = oneLine.map(val => outValue(parseCode, val, sanitizeFormulas)).join(parseCode);
             lines.push(rowStr);
             oneLine.fill(undefined); // 次の行のためにクリア
             rowCount++;

@@ -157,7 +157,7 @@ function resolveServerConfig(baseDir, frameworkDir, cliOptions) {
     const port = cliOptions.port || conf.port || parseInt(process.env.PORT, 10) || 3000;
     const hostname = cliOptions.hostname || conf.hostname || process.env.HOST || '0.0.0.0';
 
-    return { port, hostname };
+    return { ...conf, port, hostname };
 }
 
 /**
@@ -177,10 +177,14 @@ function startServer(customOptions = {}) {
     // ログ初期化
     initLogger(baseDir);
 
-    const { port, hostname } = resolveServerConfig(baseDir, frameworkDir, {
+    const serverConf = resolveServerConfig(baseDir, frameworkDir, {
         port: customOptions.port || cliOptions.port,
         hostname: customOptions.hostname || cliOptions.hostname
     });
+    const { port, hostname } = serverConf;
+    const maxBodyLength = (typeof serverConf.maxBodyLength === 'number' && serverConf.maxBodyLength > 0)
+        ? serverConf.maxBodyLength
+        : 10 * 1024 * 1024; // デフォルト 10MB
 
     console.log('====================================================');
     console.log(' 🚀 maachang server (Bun.serve on-premise framework)');
@@ -195,6 +199,7 @@ function startServer(customOptions = {}) {
         port,
         hostname,
         idleTimeout: 255,
+        maxRequestBodySize: maxBodyLength,
         async fetch(req) {
             try {
                 return await handleRequest(req, {

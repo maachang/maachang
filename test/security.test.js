@@ -370,5 +370,198 @@ describe('Security Protections Suite', () => {
             expect(masked).toContain('Bearer ***');
             expect(masked).not.toContain('eyJhbGciOi');
         });
+
+        it('access_token, refresh_token, client_secret, private_key, session_id がマスクされること', () => {
+            const input = {
+                access_token: 'at-12345',
+                refresh_token: 'rt-67890',
+                client_secret: 'cs-secret',
+                private_key: 'pk-secret',
+                session_id: 'sid-secret',
+                normalKey: 'normalValue'
+            };
+            const masked = logger.maskSensitiveData(input);
+            expect(masked.access_token).toBe('***');
+            expect(masked.refresh_token).toBe('***');
+            expect(masked.client_secret).toBe('***');
+            expect(masked.private_key).toBe('***');
+            expect(masked.session_id).toBe('***');
+            expect(masked.normalKey).toBe('normalValue');
+        });
+    });
+
+    describe('12. Symlink Escape Protection in isSafePath', () => {
+        const { isSafePath } = require('../src/context.js');
+        const symlinkTestDir = path.resolve(__dirname, '../.tmp_symlink_suite');
+
+        beforeAll(() => {
+            fs.mkdirSync(path.join(symlinkTestDir, 'public'), { recursive: true });
+            try {
+                fs.symlinkSync('/etc/hosts', path.join(symlinkTestDir, 'public', 'external_link'));
+            } catch (_) {}
+        });
+
+        afterAll(() => {
+            if (fs.existsSync(symlinkTestDir)) {
+                fs.rmSync(symlinkTestDir, { recursive: true, force: true });
+            }
+        });
+
+        it('baseDir 外を指すシンボリックリンクへのアクセスを拒否すること', () => {
+            const linkPath = path.join(symlinkTestDir, 'public', 'external_link');
+            if (fs.existsSync(linkPath)) {
+                expect(isSafePath(path.join(symlinkTestDir, 'public'), linkPath)).toBe(false);
+            }
+        });
+    });
+
+    describe('13. Automatic Secure Session Cookie on HTTPS via createSession', () => {
+        const sessionModule = require('../modules/session.js');
+
+        it('HTTPS リクエスト時に createSession で自動的に Secure 属性が付与されること', () => {
+            const reqHttps = new Request('https://example.com/');
+            const ctxHttps = createContext({
+                req: reqHttps,
+                url: new URL('https://example.com/'),
+                body: null,
+                baseDir: testProjectDir,
+                frameworkDir
+            });
+
+            sessionModule.createSession(ctxHttps.$response, { user: 'testUser' });
+            const setCookie = ctxHttps.$response.getHeaders().get('Set-Cookie');
+            expect(setCookie).toContain('Secure');
+            expect(setCookie).toContain('HttpOnly');
+        });
+    });
+
+    describe('14. RBAC Module Session Integration', () => {
+        const sessionModule = require('../modules/session.js');
+        const rbacModule = require('../modules/auth/rbac.js');
+
+        it('有効なセッションを持つリクエストから getUser() でユーザー情報が取得できること', async () => {
+            const created = sessionModule.createSession(null, { userId: 'admin1', role: 'admin' });
+            const req = new Request('http://localhost:3000/', {
+                headers: { 'cookie': `maachang_sid=${created.sid}` }
+            });
+            const ctx = createContext({
+                req,
+                url: new URL('http://localhost:3000/'),
+                body: null,
+                baseDir: testProjectDir,
+                frameworkDir
+            });
+
+            const user = await rbacModule.getUser(ctx.$request);
+            expect(user).not.toBeNull();
+            expect(user.userId).toBe('admin1');
+            expect(rbacModule.hasRole(user, 'admin')).toBe(true);
+            expect(rbacModule.hasRole(user, 'superadmin')).toBe(false);
+        });
+    });
+
+    describe('15. CSRF Secret Protection', () => {
+        const csrf = require('../modules/auth/csrf.js');
+
+        it('本番環境で CSRF_SECRET 未設定時にランダムシークレットが生成されること', () => {
+            const originalEnv = process.env.NODE_ENV;
+            const originalSecret = process.env.CSRF_SECRET;
+            try {
+                process.env.NODE_ENV = 'production';
+                delete process.env.CSRF_SECRET;
+                const token = csrf.generateToken('session_test_123');
+                expect(token).toBeDefined();
+                expect(token.length).toBe(64); // sha256 hex
+                // 一貫して同じプロセス内では同一トークンが計算されること
+                expect(csrf.verify('session_test_123', token)).toBe(true);
+            } finally {
+                process.env.NODE_ENV = originalEnv;
+                if (originalSecret) process.env.CSRF_SECRET = originalSecret;
+            }
+        });
+    });
+
+    describe('16. CSV Formula Injection Protection', () => {
+        const { writeCsv } = require('../modules/csv/csvWriter.js');
+
+        it('sanitizeFormulas: true 時に数式プレフィックス (=, +, -, @) の先頭にクォートが付与されること', () => {
+            const headers = ['id', 'formula'];
+            const rows = [
+                { id: 1, formula: '=1+1' },
+                { id: 2, formula: '+cmd|test' },
+                { id: 3, formula: '@SUM(A1:A2)' }
+            ];
+            const csv = writeCsv(headers, rows, { sanitizeFormulas: true });
+            expect(csv).toContain("'=1+1");
+            expect(csv).toContain("'+cmd|test");
+            expect(csv).toContain("'@SUM(A1:A2)");
+        });
+    });
+
+    describe('17. JWT Algorithm Security', () => {
+        const jwt = require('../modules/auth/jwt.js');
+
+        it('アルゴリズムが HS256 以外の不正なトークンは verify で拒否されること', () => {
+            const secret = 'test-jwt-secret';
+            // alg: none トークンの模倣
+            const headerNone = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+            const payload = Buffer.from(JSON.stringify({ userId: 'u1', exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
+            const fakeToken = `${headerNone}.${payload}.`;
+
+            expect(jwt.verify(fakeToken, secret)).toBeNull();
+            expect(() => jwt.verify(fakeToken, secret, { noError: false })).toThrow('Unsupported JWT algorithm');
+        });
+    });
+
+    describe('18. Malformed Session ID Rejection', () => {
+        const sessionModule = require('../modules/session.js');
+
+        it('不正な形式 (記号混入・短すぎる・長すぎる等) の sid は getSession で即座に null となること', () => {
+            const badReq1 = { getCookie: () => "' OR '1'='1" };
+            const badReq2 = { getCookie: () => "short" };
+            const badReq3 = { getCookie: () => "../../../etc/passwd" };
+            const badReq4 = { getCookie: () => "a".repeat(200) };
+
+            expect(sessionModule.getSession(badReq1)).toBeNull();
+            expect(sessionModule.getSession(badReq2)).toBeNull();
+            expect(sessionModule.getSession(badReq3)).toBeNull();
+            expect(sessionModule.getSession(badReq4)).toBeNull();
+        });
+    });
+
+    describe('19. Low-Risk Hardening (Headers, Password Validation, Healthz Masking)', () => {
+        const passwordModule = require('../modules/auth/password.js');
+
+        it('デフォルトセキュリティヘッダーに X-Permitted-Cross-Domain-Policies と COOP が含まれること', async () => {
+            const req = new Request('http://localhost:3000/');
+            const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: true });
+            expect(res.headers.get('X-Permitted-Cross-Domain-Policies')).toBe('none');
+            expect(res.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
+        });
+
+        it('本番モード (isDev: false) で healthCheck.detailed が未指定の場合、内部バージョンやメモリが隠蔽されること', async () => {
+            const req = new Request('http://localhost:3000/healthz');
+            const res = await handleRequest(req, { baseDir: testProjectDir, frameworkDir, isDev: false });
+            expect(res.status).toBe(200);
+            const data = await res.json();
+            expect(data.status).toBe('ok');
+            expect(data.uptime).toBeDefined();
+            expect(data.timestamp).toBeDefined();
+            expect(data.memory).toBeUndefined();
+            expect(data.version).toBeUndefined();
+        });
+
+        it('password モジュールで不正な型の入力や巨大な iterations が安全に処理されること', () => {
+            expect(() => passwordModule.hash(12345)).toThrow();
+            expect(passwordModule.verify(null, {})).toBe(false);
+            expect(passwordModule.verify('test', null)).toBe(false);
+            expect(passwordModule.verify('test', { salt: 123, hash: 'abc' })).toBe(false);
+            expect(passwordModule.verify('test', { salt: 'abc', hash: 123 })).toBe(false);
+
+            // 巨大な iterations が指定されても DoS にならずキャップされること (上限20万回)
+            const hashed = passwordModule.hash('password123', 300000);
+            expect(passwordModule.verify('password123', hashed)).toBe(true);
+        });
     });
 });
+
