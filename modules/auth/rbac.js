@@ -289,24 +289,30 @@
                 throw err;
             }
 
-            if (typeof $response === "function") {
-                const res = $response();
+            let res = options.res || options.response;
+            if (!res && typeof $response === "function") {
+                res = $response();
+            } else if (!res && typeof $response === "object") {
+                res = $response;
+            }
+
+            if (res) {
                 if (isNotLoggedIn) {
                     const loginUrl = options.loginUrl || conf.loginUrl;
-                    if (loginUrl) {
+                    if (loginUrl && typeof res.redirect === 'function') {
                         res.redirect(loginUrl, 302);
                         return false;
                     }
-                    res.status(401);
-                    res.body({ error: "Unauthorized", message: "Login required" });
+                    if (typeof res.status === 'function') res.status(401);
+                    if (typeof res.body === 'function') res.body({ error: "Unauthorized", message: "Login required" });
                 } else {
                     const forbiddenUrl = options.forbiddenUrl || conf.forbiddenUrl;
-                    if (forbiddenUrl) {
+                    if (forbiddenUrl && typeof res.redirect === 'function') {
                         res.redirect(forbiddenUrl, 302);
                         return false;
                     }
-                    res.status(403);
-                    res.body({ error: "Forbidden", message: "Access denied" });
+                    if (typeof res.status === 'function') res.status(403);
+                    if (typeof res.body === 'function') res.body({ error: "Forbidden", message: "Access denied" });
                 }
             }
             return false;
@@ -382,13 +388,100 @@
             return true;
         };
 
+        // オブジェクト/リソース所有権チェック (BOLA/IDOR対策).
+        // ログイン中のユーザーが指定されたリソースの所有者 (ownerId) と一致するか判定.
+        // 管理者(admin)のアクセス許可や、カスタムIDフィールド抽出に対応.
+        // user: ユーザーオブジェクト または 省略時は現在のセッション
+        // resourceOrOwnerId: 所有者ID文字列/数値、または { userId, ownerId, ... } を含むリソースオブジェクト
+        // options: { idField: 'userId'|'id', allowAdmin: true, checkAdminJs: true }
+        const isOwner = async function (user, resourceOrOwnerId, options) {
+            options = options || {};
+            let targetUser = user;
+            if (!targetUser) {
+                targetUser = await getUser(options.req || options.request);
+            }
+            if (!targetUser) return false;
+
+            // 管理者(admin)バイパスのチェック (デフォルト有効)
+            if (options.allowAdmin !== false) {
+                if (hasRole(targetUser, 'admin')) {
+                    return true;
+                }
+                if (options.checkAdminJs !== false) {
+                    const adm = _getAdmin();
+                    if (adm && typeof adm.isAdmin === "function") {
+                        try {
+                            const uId = targetUser.userId || targetUser.id || targetUser.email || targetUser.mail;
+                            if (uId && await adm.isAdmin(uId)) {
+                                return true;
+                            }
+                        } catch (_) {}
+                    }
+                }
+            }
+
+            // ユーザー自身のIDを特定
+            const currentUserId = (typeof targetUser === 'object')
+                ? (targetUser.userId !== undefined ? targetUser.userId : (targetUser.id !== undefined ? targetUser.id : null))
+                : targetUser;
+
+            if (currentUserId === null || currentUserId === undefined) return false;
+
+            // リソース側の所有者IDを特定
+            let targetOwnerId = resourceOrOwnerId;
+            if (resourceOrOwnerId && typeof resourceOrOwnerId === 'object') {
+                const idField = options.idField;
+                if (idField && resourceOrOwnerId[idField] !== undefined) {
+                    targetOwnerId = resourceOrOwnerId[idField];
+                } else if (resourceOrOwnerId.userId !== undefined) {
+                    targetOwnerId = resourceOrOwnerId.userId;
+                } else if (resourceOrOwnerId.ownerId !== undefined) {
+                    targetOwnerId = resourceOrOwnerId.ownerId;
+                } else if (resourceOrOwnerId.user_id !== undefined) {
+                    targetOwnerId = resourceOrOwnerId.user_id;
+                } else if (resourceOrOwnerId.owner_id !== undefined) {
+                    targetOwnerId = resourceOrOwnerId.owner_id;
+                } else if (resourceOrOwnerId.id !== undefined) {
+                    targetOwnerId = resourceOrOwnerId.id;
+                }
+            }
+
+            if (targetOwnerId === null || targetOwnerId === undefined) return false;
+
+            // 文字列化して厳格比較 (数値・文字列の型違いによる不一致を防止)
+            return String(currentUserId) === String(targetOwnerId);
+        };
+
+        // オブジェクト所有権ガード (BOLA/IDOR対策).
+        // 所有権が一致しない、または未ログインの場合に自動で 401/403 応答または例外throw.
+        // 一致した場合は true を返す.
+        const ensureOwner = async function (resourceOrOwnerId, options) {
+            options = options || {};
+            let user = options.user;
+            if (!user) {
+                user = await getUser(options.req || options.request);
+            }
+
+            if (!user) {
+                return _handleDenied(true, options);
+            }
+
+            const ok = await isOwner(user, resourceOrOwnerId, options);
+            if (!ok) {
+                return _handleDenied(false, options);
+            }
+            return true;
+        };
+
         return {
             getUser: getUser,
             hasRole: hasRole,
             hasPermission: hasPermission,
             can: hasPermission,
             requireRole: requireRole,
-            requirePermission: requirePermission
+            requirePermission: requirePermission,
+            isOwner: isOwner,
+            ensureOwner: ensureOwner
         };
     };
 
@@ -400,4 +493,6 @@
     exports.can = _defaultInstance.can;
     exports.requireRole = _defaultInstance.requireRole;
     exports.requirePermission = _defaultInstance.requirePermission;
+    exports.isOwner = _defaultInstance.isOwner;
+    exports.ensureOwner = _defaultInstance.ensureOwner;
 })();

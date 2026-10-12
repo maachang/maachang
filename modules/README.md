@@ -240,8 +240,8 @@ const isValid = csrf.verify(session.sid, clientToken);
 
 ---
 
-### 9. `auth/rbac.js` (ロールベースアクセス制御)
-ロールの階層構造や権限の割り当て、ルートガードを管理します。
+### 9. `auth/rbac.js` (ロールベースアクセス制御 & BOLA/IDOR所有権ガード)
+ロールの階層構造や権限の割り当て、ルートガード、リソース所有権チェック（BOLA/IDOR対策）を管理します。
 
 ```javascript
 const rbac = $loadLib('rbac.js');
@@ -254,6 +254,17 @@ if (!rbac.hasPermission(user.role, 'user.write')) {
 // ロール階層チェック
 if (rbac.hasRole(user.role, 'admin')) {
     // 管理者向け処理
+}
+
+// 🛡️ BOLA / IDOR 対策: リソース所有権の検証
+// ログインユーザーと対象データの所有者が一致するか判定 (admin は自動許可)
+if (!await rbac.isOwner(user, resource)) {
+    return $response.json({ error: '他人のリソースにはアクセスできません' }, 403);
+}
+
+// ガード関数: 所有者でなければ自動で 403 / 401 を設定して終了
+if (!await rbac.ensureOwner(resource)) {
+    return;
 }
 ```
 

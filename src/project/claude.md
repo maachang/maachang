@@ -34,6 +34,11 @@
 - **独断での仕様決定禁止**: 実装を任された際、詳細仕様（データフィルタリング手法、抽出ロジック、制限値、除外基準など）を独断で決定・補完することは禁止。必ずユーザーの承認を得ること。
 - **車輪の再発明の禁止**: maachang が標準提供しているモジュール（`session.js`, `logger.js`, `validate.js` 等）や組み込みヘルパー（`$request`, `$response`, `$db` 等）を優先活用し、独自ライブラリを安易に自作しない。
 - **暗号・セキュリティ乱数の利用ルール（crypto.random 系の義務付け）**: セッションID、CSRFトークン、パスワードソルト、暗号鍵、認証・署名用トークンなどのセキュリティ・暗号化関連用途には、`Math.random()` や非暗号論的乱数生成器（PRNG）の利用を厳禁とする。必ず `crypto.randomBytes()`、`crypto.getRandomValues()`、`crypto.randomUUID()` などの標準 `crypto.random` 系暗号論的疑似乱数（CSPRNG）を使用すること。
+- **ログイン機能・ユーザー別リソースにおける認可不備（BOLA/IDOR）対策の利用必須化**:
+  ログイン機能やユーザー固有データを扱う Web 画面・API を実装する際は、リクエストパラメータ（ID等）の書き換えによる他者データの漏洩・改ざん（BOLA: Broken Object Level Authorization / IDOR: Insecure Direct Object Reference）を徹底排除すること。以下の実装パターンを**利用必須**とする:
+  1. **リクエスト ID 盲信の禁止**: クライアントから渡された `userId` を信用せず、必ずセッション（`$loadLib('session.js')` または `rbac.getUser($request)`）から取得した本人情報を基準とする。
+  2. **DB スコープ強制の利用 (`$db.forUser`)**: ログインユーザー固有のテーブル（注文、履歴、個人設定等）を操作する際は、単体の `SELECT * FROM items WHERE id = ?` をベタ書きせず、`const userDb = $db.forUser(currentUser);` を用いて `userDb.findById(...)` / `userDb.find(...)` / `userDb.updateById(...)` / `userDb.deleteById(...)` を利用すること。これにより `WHERE user_id = ?` が自動強制され、他者データへのアクセスが構造的に遮断される。
+  3. **オブジェクト所有権ガードの利用 (`rbac.ensureOwner` / `rbac.isOwner`)**: リソース取得時や更新・削除処理の前には、`const rbac = $loadLib('rbac.js');` の `if (!await rbac.ensureOwner(resource)) return;` を実行し、本人以外のアクセス（管理者以外）に対して確実に `403 Forbidden` を返却すること。
 - **テーブルスキーマ定義の出力・管理**: データベース（SQLite3 等）のテーブルを作成・変更した場合は、テーブルスキーマ定義（DDL、SQL、テーブル定義書等）を必ず `schema/` ディレクトリ配下に出力・更新して管理すること。実装やクエリ作成時には `schema/` 内の定義を参照すること。
 - **バリデーション定義の出力・管理**: フォーム入力や API リクエストの検証スキーマは、必ず `validates/` ディレクトリ配下にモジュールとして定義・出力すること（例: `validates/login.js`, `validates/user.js`）。ページや API 実装時はこれを `$loadLib` で読み込み、`validate.js` を用いて検証を行うこと。
 - **既存コメントの維持**: 処理内容が変わって意味が通じなくなる場合を除き、既存コメントを削除しない。
@@ -75,7 +80,7 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 | `$params` | インクルードパラメータの参照 | テンプレートやパーツ内で `${$params.title}` や `${$params.user}` としてアクセス |
 | `$loadLib("name.js")` | モジュールのロード | `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` の順で検索してロード |
 | `$loadConf("conf名")` | 設定 JSON の取得 | `conf/{conf名}.local.json`（ローカル優先）→ `conf/{conf名}.json` を取得 |
-| `$db` | SQLite3 データベース操作 | `bun:sqlite` ラッパー。<br>`$db.get(sql, params)`, `$db.all(sql, params)`, `$db.run(sql, params)`, `$db.exec(sql)`, `$db.transaction(fn)` |
+| `$db` | SQLite3 データベース操作 | `bun:sqlite` ラッパー。<br>`$db.get(sql, params)`, `$db.all(sql, params)`, `$db.run(sql, params)`, `$db.exec(sql)`, `$db.transaction(fn)`<br>`$db.forUser(user, options)`: ユーザー/所有者スコープ強制（BOLA/IDOR対策） |
 | `$require(mod)` | 標準ライブラリ require | `crypto`, `path`, `fs` 等の安全な呼び出し |
 
 
@@ -131,6 +136,7 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`jwt.sign(payload, secret, opt)` / `jwt.verify(token, secret)`**: HS256 による JWT トークン署名・検証。
 - **`csrf.generateToken(sid?)` / `csrf.verify(sid?, token?)` / `csrf.verify(req)`**: セッション連携 CSRF トークン生成・検証。
 - **`rbac.hasRole(user, role)` / `rbac.can(user, permission)` / `rbac.create(config)`**: ロールベース認可（階層継承 `inherits` およびワイルドカード `*` 認可）。
+- **`rbac.isOwner(user, resource)` / `rbac.ensureOwner(resource, opt)`**: リソース所有権の検証＆不一致時403自動返却（BOLA/IDOR対策）。
 - **`corsFilter.apply(options)`**: `filter.mt.js` 等で利用する CORS 制御ヘルパー（許可オリジン判定、OPTIONS プリフライト対応、資格情報ヘッダー付与）。
 
 ### 5. `csvReader.js` / `csvWriter.js`（CSV 操作）

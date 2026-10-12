@@ -563,5 +563,107 @@ describe('Security Protections Suite', () => {
             expect(passwordModule.verify('password123', hashed)).toBe(true);
         });
     });
+
+    describe('20. BOLA / IDOR Authorization Protection', () => {
+        const rbacModule = require('../modules/auth/rbac.js');
+        const dbWrapper = require('../src/db.js');
+
+        it('rbac.isOwner で本人および管理者の一致判定ができること', async () => {
+            const userA = { userId: 'user-101', role: 'viewer' };
+            const userB = { userId: 'user-202', role: 'viewer' };
+            const adminUser = { userId: 'admin-999', role: 'admin' };
+
+            const resourceA = { id: 1, userId: 'user-101', title: 'User A Data' };
+
+            // 本人
+            expect(await rbacModule.isOwner(userA, resourceA)).toBe(true);
+            expect(await rbacModule.isOwner(userA, 'user-101')).toBe(true);
+
+            // 他人 (IDOR 遮断)
+            expect(await rbacModule.isOwner(userB, resourceA)).toBe(false);
+            expect(await rbacModule.isOwner(userB, 'user-101')).toBe(false);
+
+            // 管理者バイパス (デフォルト許可)
+            expect(await rbacModule.isOwner(adminUser, resourceA)).toBe(true);
+            // 管理者バイパス無効時
+            expect(await rbacModule.isOwner(adminUser, resourceA, { allowAdmin: false })).toBe(false);
+        });
+
+        it('rbac.ensureOwner で不一致時に 403 が設定されること', async () => {
+            const req = new Request('http://localhost:3000/api/item');
+            const ctx = createContext({
+                req,
+                url: new URL('http://localhost:3000/api/item'),
+                body: null,
+                baseDir: testProjectDir,
+                frameworkDir
+            });
+
+            // ユーザーBでログイン中の状態をシミュレート
+            const userB = { userId: 'user-202', role: 'viewer' };
+            const targetResource = { id: 99, userId: 'user-101' };
+
+            const ok = await rbacModule.ensureOwner(targetResource, {
+                user: userB,
+                request: ctx.$request,
+                response: ctx.$response
+            });
+
+            expect(ok).toBe(false);
+            expect(ctx.$response.getStatus()).toBe(403);
+            expect(ctx.$response.getBody().error).toBe('Forbidden');
+        });
+
+        it('db.forUser で自動的にログインユーザーのレコードのみにスコープされること', () => {
+            const dbPath = ':memory:';
+            dbWrapper.exec(`
+                CREATE TABLE items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    title TEXT NOT NULL
+                );
+            `, dbPath);
+
+            const userA = { userId: 'user-101' };
+            const userB = { userId: 'user-202' };
+
+            const dbA = dbWrapper.forUser(userA, { dbPath });
+            const dbB = dbWrapper.forUser(userB, { dbPath });
+
+            // それぞれデータを登録
+            dbA.insert('items', { title: 'Item 1 of A' });
+            dbA.insert('items', { title: 'Item 2 of A' });
+            dbB.insert('items', { title: 'Item 1 of B' });
+
+            // 件数チェック
+            expect(dbA.count('items')).toBe(2);
+            expect(dbB.count('items')).toBe(1);
+
+            // 全件取得
+            const itemsA = dbA.find('items');
+            expect(itemsA.length).toBe(2);
+            expect(itemsA.every(i => i.user_id === 'user-101')).toBe(true);
+
+            // findById で他人のリソースを指定しても取得できないこと (IDOR 防止)
+            const itemB = dbB.find('items')[0];
+            expect(itemB).toBeDefined();
+            // userA が userB のアイテムIDを指定して取得を試みる -> null
+            expect(dbA.findById('items', itemB.id)).toBeNull();
+            // userB は取得できる
+            expect(dbB.findById('items', itemB.id)).not.toBeNull();
+
+            // 他人のデータを updateById / deleteById で更新・削除できないこと
+            const updateRes = dbA.updateById('items', itemB.id, { title: 'Tampered' });
+            expect(updateRes.changes).toBe(0);
+
+            const deleteRes = dbA.deleteById('items', itemB.id);
+            expect(deleteRes.changes).toBe(0);
+
+            // B本人であれば削除できる
+            const validDelete = dbB.deleteById('items', itemB.id);
+            expect(validDelete.changes).toBe(1);
+        });
+    });
 });
+
 

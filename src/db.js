@@ -142,6 +142,134 @@ function closeAll() {
     close();
 }
 
+/**
+ * 指定ユーザー/テナントスコープにバインドされた安全なDBクライアントを生成 (BOLA/IDOR対策)
+ * findById / find / count / updateById / deleteById 等の操作時に
+ * 自動で `WHERE owner_column = userId` を強制付与して他者データへのアクセスを遮断する。
+ *
+ * @param {Object|string|number} user ユーザーオブジェクト({userId, id等})またはユーザーID値
+ * @param {Object} [options] { ownerColumn: 'user_id', dbPath: string }
+ * @returns {Object} スコープ化されたDBクライアント
+ */
+function forUser(user, options = {}) {
+    let currentUserId = user;
+    if (user && typeof user === 'object') {
+        currentUserId = user.userId !== undefined ? user.userId : (user.id !== undefined ? user.id : null);
+    }
+    if (currentUserId === null || currentUserId === undefined) {
+        throw new Error('[db.forUser] Invalid user context or missing userId');
+    }
+
+    const ownerColumn = options.ownerColumn || 'user_id';
+    const defaultDbPath = options.dbPath;
+
+    // テーブル名やカラム名の安全な識別子検証 (英数字とアンダースコアのみ許可)
+    const checkIdent = (name) => {
+        if (!name || typeof name !== 'string' || !/^[a-zA-Z0-9_]+$/.test(name)) {
+            throw new Error(`[db.forUser] Invalid identifier: "${name}"`);
+        }
+        return name;
+    };
+
+    return {
+        userId: currentUserId,
+        ownerColumn,
+
+        /**
+         * IDと所有者カラムで1件取得
+         */
+        findById(table, id, idColumn = 'id', dbPath = defaultDbPath) {
+            checkIdent(table);
+            checkIdent(idColumn);
+            checkIdent(ownerColumn);
+            const sql = `SELECT * FROM ${table} WHERE ${idColumn} = ? AND ${ownerColumn} = ? LIMIT 1`;
+            return get(sql, [id, currentUserId], dbPath);
+        },
+
+        /**
+         * 所有者カラムで絞り込んで全件/条件取得
+         */
+        find(table, whereClause = '', params = [], dbPath = defaultDbPath) {
+            checkIdent(table);
+            checkIdent(ownerColumn);
+            let sql = `SELECT * FROM ${table} WHERE ${ownerColumn} = ?`;
+            const queryParams = [currentUserId];
+            if (whereClause && whereClause.trim()) {
+                sql += ` AND (${whereClause})`;
+                if (Array.isArray(params)) {
+                    queryParams.push(...params);
+                } else {
+                    queryParams.push(params);
+                }
+            }
+            return all(sql, queryParams, dbPath);
+        },
+
+        /**
+         * 所有者カラムで絞り込んで件数取得
+         */
+        count(table, whereClause = '', params = [], dbPath = defaultDbPath) {
+            checkIdent(table);
+            checkIdent(ownerColumn);
+            let sql = `SELECT COUNT(*) AS count FROM ${table} WHERE ${ownerColumn} = ?`;
+            const queryParams = [currentUserId];
+            if (whereClause && whereClause.trim()) {
+                sql += ` AND (${whereClause})`;
+                if (Array.isArray(params)) {
+                    queryParams.push(...params);
+                } else {
+                    queryParams.push(params);
+                }
+            }
+            const res = get(sql, queryParams, dbPath);
+            return res ? Number(res.count) : 0;
+        },
+
+        /**
+         * 所有者カラムを自動付与してレコード挿入
+         */
+        insert(table, data = {}, dbPath = defaultDbPath) {
+            checkIdent(table);
+            checkIdent(ownerColumn);
+            const record = { ...data, [ownerColumn]: currentUserId };
+            const keys = Object.keys(record).map(checkIdent);
+            if (keys.length === 0) {
+                throw new Error('[db.forUser] Cannot insert empty record');
+            }
+            const placeholders = keys.map(() => '?').join(', ');
+            const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
+            const values = keys.map(k => record[k]);
+            return run(sql, values, dbPath);
+        },
+
+        /**
+         * 所有者カラムで保護された状態でID指定更新 (他人のIDは更新不可)
+         */
+        updateById(table, id, data = {}, idColumn = 'id', dbPath = defaultDbPath) {
+            checkIdent(table);
+            checkIdent(idColumn);
+            checkIdent(ownerColumn);
+            const keys = Object.keys(data).filter(k => k !== ownerColumn && k !== idColumn).map(checkIdent);
+            if (keys.length === 0) return { changes: 0, lastInsertRowid: 0 };
+            const setPart = keys.map(k => `${k} = ?`).join(', ');
+            const sql = `UPDATE ${table} SET ${setPart} WHERE ${idColumn} = ? AND ${ownerColumn} = ?`;
+            const values = [...keys.map(k => data[k]), id, currentUserId];
+            return run(sql, values, dbPath);
+        },
+
+        /**
+         * 所有者カラムで保護された状態でID指定削除 (他人のIDは削除不可)
+         */
+        deleteById(table, id, idColumn = 'id', dbPath = defaultDbPath) {
+            checkIdent(table);
+            checkIdent(idColumn);
+            checkIdent(ownerColumn);
+            const sql = `DELETE FROM ${table} WHERE ${idColumn} = ? AND ${ownerColumn} = ?`;
+            return run(sql, [id, currentUserId], dbPath);
+        }
+    };
+}
+
 module.exports = {
     getDb,
     get,
@@ -150,5 +278,7 @@ module.exports = {
     exec,
     transaction,
     close,
-    closeAll
+    closeAll,
+    forUser
 };
+
