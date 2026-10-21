@@ -110,10 +110,43 @@ function hmac(text, key) {
     return crypto.createHmac('sha256', String(key)).update(String(text)).digest('hex');
 }
 
+/**
+ * タイミング攻撃を防止する定数時間文字列比較 (Constant-time comparison)
+ * APIキー、署名、トークン検証などに利用
+ * @param {string} a 
+ * @param {string} b 
+ * @returns {boolean}
+ */
+function timingSafeEqual(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string') {
+        return false;
+    }
+    try {
+        const bufA = Buffer.from(a, 'utf8');
+        const bufB = Buffer.from(b, 'utf8');
+        if (bufA.length === bufB.length && typeof crypto.timingSafeEqual === 'function') {
+            return crypto.timingSafeEqual(bufA, bufB);
+        }
+    } catch (_) {}
+
+    // 長さが異なる場合も即時 return せず、ダミー走査してタイミング差を極小化
+    const lenA = a.length;
+    const lenB = b.length;
+    let diff = lenA ^ lenB;
+    const maxLen = Math.max(lenA, lenB);
+    for (let i = 0; i < maxLen; i++) {
+        const charA = i < lenA ? a.charCodeAt(i) : 0;
+        const charB = i < lenB ? b.charCodeAt(i) : 0;
+        diff |= charA ^ charB;
+    }
+    return diff === 0;
+}
+
 module.exports = {
     encrypt,
     decrypt,
     randomToken,
     sha256,
-    hmac
+    hmac,
+    timingSafeEqual
 };

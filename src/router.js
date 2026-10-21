@@ -14,6 +14,7 @@
 
 'use strict';
 
+const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
 const { createContext, parseJson } = require('./context.js');
@@ -60,9 +61,10 @@ function getServerConf(baseDir, frameworkDir) {
  * @param {Response} response 
  * @param {Object} serverConf 
  * @param {boolean} [isSecure=false] 
+ * @param {string} [cspNonce=null] 
  * @returns {Response}
  */
-function applySecurityHeaders(response, serverConf = {}, isSecure = false) {
+function applySecurityHeaders(response, serverConf = {}, isSecure = false, cspNonce = null) {
     if (serverConf.securityHeaders === false) {
         return response;
     }
@@ -74,7 +76,8 @@ function applySecurityHeaders(response, serverConf = {}, isSecure = false) {
         'X-XSS-Protection': '1; mode=block',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'X-Permitted-Cross-Domain-Policies': 'none',
-        'Cross-Origin-Opener-Policy': 'same-origin'
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Resource-Policy': 'same-origin'
     };
 
     // HTTPS 接続時の HSTS (Strict-Transport-Security)
@@ -90,9 +93,15 @@ function applySecurityHeaders(response, serverConf = {}, isSecure = false) {
 
     // CSP (Content-Security-Policy) の反映
     if (serverConf.csp) {
-        defaults['Content-Security-Policy'] = typeof serverConf.csp === 'string'
+        let cspStr = typeof serverConf.csp === 'string'
             ? serverConf.csp
             : Object.entries(serverConf.csp).map(([k, v]) => `${k} ${v}`).join('; ');
+
+        // 動的 nonce 置換 ({nonce} または 'nonce-{{nonce}}')
+        if (cspNonce && cspStr.includes('{nonce}')) {
+            cspStr = cspStr.replace(/\{nonce\}/g, cspNonce);
+        }
+        defaults['Content-Security-Policy'] = cspStr;
     }
 
     const effective = { ...defaults, ...customSec };
@@ -124,20 +133,35 @@ function checkRateLimit(ip, rateLimitConf) {
     }
     const windowMs = rateLimitConf.windowMs || 60 * 1000; // デフォルト 1分
     const max = rateLimitConf.max || 100; // デフォルト 100リクエスト
+    const banThreshold = rateLimitConf.banThreshold || 0; // 一定回数以上の超過で一時遮断 (0: 無効)
+    const banDurationMs = rateLimitConf.banDurationMs || 15 * 60 * 1000; // BAN期間 (デフォルト15分)
     const now = Date.now();
 
     // 定期的な期限切れエントリの削除 (サイズ肥大化防止: 10000件超えたら掃除)
     if (_rateLimitStore.size > 10000) {
         for (const [key, val] of _rateLimitStore.entries()) {
-            if (val.resetAt <= now) {
+            if ((val.bannedUntil && val.bannedUntil <= now) || (!val.bannedUntil && val.resetAt <= now)) {
                 _rateLimitStore.delete(key);
             }
         }
     }
 
     let record = _rateLimitStore.get(ip);
+
+    // BAN期間中の判定
+    if (record && record.bannedUntil && record.bannedUntil > now) {
+        const banWaitSeconds = Math.ceil((record.bannedUntil - now) / 1000);
+        return {
+            allowed: false,
+            banned: true,
+            limit: max,
+            remaining: 0,
+            resetSeconds: banWaitSeconds
+        };
+    }
+
     if (!record || record.resetAt <= now) {
-        record = { count: 1, resetAt: now + windowMs };
+        record = { count: 1, resetAt: now + windowMs, violations: record ? record.violations : 0 };
         _rateLimitStore.set(ip, record);
         return {
             allowed: true,
@@ -152,6 +176,19 @@ function checkRateLimit(ip, rateLimitConf) {
     const resetSeconds = Math.ceil((record.resetAt - now) / 1000);
 
     if (record.count > max) {
+        // BAN閾値が設定されている場合、度重なる超過で一時BAN
+        if (banThreshold > 0 && record.count >= (max + banThreshold)) {
+            record.bannedUntil = now + banDurationMs;
+            const banWaitSeconds = Math.ceil(banDurationMs / 1000);
+            return {
+                allowed: false,
+                banned: true,
+                limit: max,
+                remaining: 0,
+                resetSeconds: banWaitSeconds
+            };
+        }
+
         return {
             allowed: false,
             limit: max,
@@ -516,6 +553,7 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
 
     // finalizeResponse: filter.after の実行とセキュリティヘッダーの自動付与を行うレスポンスラッパー
     let filterAfter = null;
+    let requestCspNonce = null;
     const finalizeResponse = async (rawRes) => {
         let res = rawRes;
         if (filterAfter && typeof filterAfter === 'function') {
@@ -559,7 +597,7 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
             });
         }
 
-        return applySecurityHeaders(res, serverConf, isSecure);
+        return applySecurityHeaders(res, serverConf, isSecure, requestCspNonce);
     };
 
     // レートリミット超過時は 429 Too Many Requests
@@ -576,8 +614,12 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
                 rateHeaders.set(k, v);
             }
         }
+        const errorMessage = rateCheck.banned
+            ? ((serverConf.rateLimit && serverConf.rateLimit.banMessage) || 'IP temporarily banned due to excessive requests')
+            : ((serverConf.rateLimit && serverConf.rateLimit.message) || 'Too Many Requests');
+
         return applySecurityHeaders(new Response(JSON.stringify({
-            error: (serverConf.rateLimit && serverConf.rateLimit.message) || 'Too Many Requests'
+            error: errorMessage
         }), {
             status: 429,
             headers: rateHeaders
@@ -746,6 +788,7 @@ async function handleRequest(req, { baseDir, frameworkDir, isDev = true }) {
         baseDir,
         frameworkDir
     });
+    requestCspNonce = context.cspNonce;
 
     const publicDir = path.join(baseDir, 'public');
     const { $include, _includeStack } = createIncludeHandler(context, publicDir, isDev);

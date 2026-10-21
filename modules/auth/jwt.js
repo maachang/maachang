@@ -113,6 +113,44 @@
         return headerPayload + "." + _sign(headerPayload, secret);
     };
 
+    // トークン失効リスト (JTI または Token Hash -> 失効日時ms)
+    const _revocationStore = new Map();
+
+    /**
+     * トークンまたはJTIを失効リストに追加 (Revoke)
+     * @param {string} tokenOrJti トークン全体または payload.jti
+     * @param {number} [expiresInSec=86400] 失効リストに保持する秒数 (未指定時24時間)
+     */
+    const revoke = function (tokenOrJti, expiresInSec = 86400) {
+        if (!tokenOrJti || typeof tokenOrJti !== "string") return;
+        const now = Date.now();
+        const expireAt = now + (expiresInSec * 1000);
+        _revocationStore.set(tokenOrJti, expireAt);
+
+        // キャッシュ肥大化防止
+        if (_revocationStore.size > 10000) {
+            for (const [k, v] of _revocationStore.entries()) {
+                if (v <= now) _revocationStore.delete(k);
+            }
+        }
+    };
+
+    /**
+     * トークンまたはJTIが失効しているか確認
+     * @param {string} tokenOrJti 
+     * @returns {boolean}
+     */
+    const isRevoked = function (tokenOrJti) {
+        if (!tokenOrJti || typeof tokenOrJti !== "string") return false;
+        const expireAt = _revocationStore.get(tokenOrJti);
+        if (!expireAt) return false;
+        if (expireAt <= Date.now()) {
+            _revocationStore.delete(tokenOrJti);
+            return false;
+        }
+        return true;
+    };
+
     // JWTトークンを検証.
     // token 検証対象のトークン文字列を設定します.
     // secret 署名検証用の共通鍵(文字列)を設定します(sign時と同じ値).
@@ -154,6 +192,11 @@
             if (payload.exp != undefined && nowSec >= payload.exp) {
                 throw new Error("JWT expired.");
             }
+            // 失効チェック (トークン全体 または payload.jti)
+            if (isRevoked(token) || (payload.jti && isRevoked(payload.jti))) {
+                throw new Error("JWT has been revoked.");
+            }
+
             return payload;
         } catch (e) {
             if (options.noError == false) {
@@ -162,4 +205,8 @@
             return null;
         }
     };
+
+    // 失効管理関数のエクスポート
+    exports.revoke = revoke;
+    exports.isRevoked = isRevoked;
 })();

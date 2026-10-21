@@ -452,7 +452,7 @@ exports.after = async function({ req, res, executionTimeMs }) {
 ```
 
 ### 13. 組み込みオブジェクト
-- `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `ips` (全ホップ配列), `protocol` (http/https), `isSecure` (真偽値), `host`, `baseUrl` (Nginxリバースプロキシヘッダー自動考慮), `getHeader()`, `getQuery()`, `getCookie()`
+- `$request` / `$request()`: `method`, `path`, `query`, `body`, `headers`, `cookies`, `ip`, `ips` (全ホップ配列), `protocol` (http/https), `isSecure` (真偽値), `host`, `baseUrl` (Nginxリバースプロキシヘッダー自動考慮), `nonce` (動的CSP暗号学的乱数), `getHeader()`, `getQuery()`, `getCookie()`
 - `$response` / `$response()`: `status(code)`, `contentType(type, charset)`, `header(k, v)`, `setCookie(k, v, opts)`, `json(data)`, `html(str)`, `text(str)`, `download(pathOrBuffer, filename, opts)`, `file(filePath, opts)`, `redirect(url)`
 - `$loadConf(name)`: `conf/{name}.local.json` または `conf/{name}.json` をロード（`//` や `/* ... */` などの **JS コメント** および末尾カンマに対応）
 - `$loadLib(name)`: `lib/` → `validates/` → `${MAACHANG_HOME}/modules/` からモジュールをロード

@@ -9,6 +9,7 @@
 
 'use strict';
 
+const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
 const dbWrapper = require('./db.js');
@@ -400,6 +401,9 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
     // ベースURL組み立て (例: https://example.com)
     const baseUrl = `${protocol}://${host}`;
 
+    // 暗号学的乱数による CSP nonce (リクエスト毎に一意)
+    const cspNonce = crypto.randomBytes(16).toString('base64');
+
     // $request 実体オブジェクト
     const requestTarget = {
         raw: req,
@@ -416,6 +420,7 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         isSecure,
         host,
         baseUrl,
+        nonce: cspNonce,
         // ヘルパーメソッド
         getHeader: (k) => headers[k ? k.toLowerCase() : ''],
         header: (k) => headers[k ? k.toLowerCase() : ''],
@@ -756,7 +761,8 @@ function createContext({ req, url, body, baseDir, frameworkDir }) {
         $loadConf,
         $loadLib,
         $require: require,
-        $db: dbWrapper
+        $db: dbWrapper,
+        cspNonce
     };
 }
 

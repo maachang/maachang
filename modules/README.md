@@ -18,15 +18,16 @@ maachang が標準提供しているモジュール群のリファレンスで�
 | | [`auth/jwt.js`](#7-authjwtjs-jwt-トークン管理) | HS256 による JWT 署名（sign）・検証（verify） |
 | | [`auth/csrf.js`](#8-authcsrfjs-csrf-トークン管理) | セッション連携 CSRF トークン生成・検証 |
 | | [`auth/rbac.js`](#9-authrbacjs-ロールベースアクセス制御) | ロール階層・権限チェック・ルートガード |
-| | [`auth/corsFilter.js`](#10-authcorsfilterjs-cors-制御) | CORS プリフライト（OPTIONS）およびヘッダー設定 |
-| **CSV 操作** | [`csv/csvWriter.js`](#11-csvcsvwriterjs-csv-書き込み) | 配列/オブジェクト ➔ CSV 文字列変換（エスケープ自動処理） |
-| | [`csv/csvReader.js`](#12-csvcsvreaderjs-csv-読み込み) | 改行・ダブルクォート対応の安全な CSV パース ＆ JSON 行変換 |
-| **バリデーション** | [`validate/validate.js`](#13-validatevalidatejs-スキーマバリデーション) | スキーマ定義による入力値検証（型・必須・文字数・範囲・正規表現） |
-| **通信・通知** | [`http.js`](#14-httpjs-http-クライアント) | タイムアウト・自動リトライ・JSON 送受信対応の fetch ラッパー |
-| | [`notification/sendSlack.js`](#15-notificationsendslackjs-slack-通知) | Incoming Webhook / Bot Token による Slack 通知送信 |
-| | [`notification/sendGithub.js`](#16-notificationsendgithubjs-github-issue-作成) | GitHub Issue の自動起票 |
-| | [`http/multipart.js`](#17-httpmultipartjs-ファイルアップロード解析) | `multipart/form-data` によるファイルアップロードの解析 |
-| **ファイル・JSON** | [`fileUtil.js`](#18-fileutiljs-ファイルjson-入出力支援) | 安全な JSON 読み書き、ファイル一覧、安全なファイル名生成 |
+| | [`auth/lockout.js`](#11-authlockoutjs-アカウントロック--ブルートフォース保護) | 連続ログイン失敗によるアカウント一時ロック＆悪質IPブロック |
+| | [`auth/corsFilter.js`](#12-authcorsfilterjs-cors-制御) | CORS プリフライト（OPTIONS）およびヘッダー設定 |
+| **CSV 操作** | [`csv/csvWriter.js`](#13-csvcsvwriterjs-csv-書き込み) | 配列/オブジェクト ➔ CSV 文字列変換（エスケープ自動処理） |
+| | [`csv/csvReader.js`](#14-csvcsvreaderjs-csv-読み込み) | 改行・ダブルクォート対応の安全な CSV パース ＆ JSON 行変換 |
+| **バリデーション** | [`validate/validate.js`](#15-validatevalidatejs-スキーマバリデーション) | スキーマ定義による入力値検証（型・必須・文字数・範囲・正規表現） |
+| **通信・通知** | [`http.js`](#16-httpjs-http-クライアント) | タイムアウト・自動リトライ・JSON 送受信・SSRF保護対応の fetch ラッパー |
+| | [`notification/sendSlack.js`](#17-notificationsendslackjs-slack-通知) | Incoming Webhook / Bot Token による Slack 通知送信 |
+| | [`notification/sendGithub.js`](#18-notificationsendgithubjs-github-issue-作成) | GitHub Issue の自動起票 |
+| | [`http/multipart.js`](#19-httpmultipartjs-ファイルアップロード解析) | `multipart/form-data` によるファイルアップロードの解析 |
+| **ファイル・JSON** | [`fileUtil.js`](#20-fileutiljs-ファイルjson-入出力支援) | 安全な JSON 読み書き、ファイル一覧、安全なファイル名生成 |
 
 ---
 
@@ -186,6 +187,9 @@ const plainText = encrypt.decrypt(cipherText, secretKey); // "SecretUserData"
 const token = encrypt.randomToken(32); // URLセーフなランダムトークン
 const hash = encrypt.sha256('targetText');
 const signature = encrypt.hmac('targetText', secretKey);
+
+// タイミング攻撃防止の定数時間文字列比較 (APIキー・署名・トークン照合等)
+const isValid = encrypt.timingSafeEqual(userProvidedToken, secretToken); // true / false
 ```
 
 ---
@@ -216,11 +220,15 @@ const secret = 'jwt-secret-key';
 // 署名 (有効期限: 秒単位)
 const token = jwt.sign({ userId: 'user123', role: 'editor' }, secret, { expiresIn: 3600 });
 
-// 検証 & ペイロード復元 (期限切れや改ざん時は null)
+// 検証 & ペイロード復元 (期限切れや改ざん、失効時は null)
 const payload = jwt.verify(token, secret);
 if (payload) {
     console.log(payload.userId, payload.role);
 }
+
+// 不正アクセス検知時やログアウト時の即時トークン失効 (Revocation)
+jwt.revoke(token, 3600); // トークン文字列または payload.jti を指定
+jwt.isRevoked(token);    // true
 ```
 
 ---
@@ -288,7 +296,50 @@ exports.handler = async function() {
 
 ---
 
-### 11. `csv/csvWriter.js` (CSV 書き込み)
+### 11. `auth/lockout.js` (アカウントロック ＆ ブルートフォース保護)
+クレデンシャルスタッフィング（リスト型攻撃）やパスワード総当たり（ブルートフォース攻撃）からアカウントを保護します。
+
+```javascript
+const lockout = $loadLib('lockout.js');
+
+// ログイン処理ハンドラー内での利用例
+exports.handler = async function() {
+    const { email, password } = $request.body || {};
+
+    // 1. ロック状態の事前チェック
+    const status = await lockout.check(email);
+    if (status.isLocked) {
+        $response.status(423); // 423 Locked
+        return { error: `アカウントは一時的にロックされています。${status.waitSeconds}秒後に再試行してください。` };
+    }
+
+    // 2. 認証処理
+    const user = db.find('users', { email })[0];
+    const passwordUtil = $loadLib('password.js');
+    const isValid = user && passwordUtil.verify(password, user.password_data);
+
+    if (!isValid) {
+        // 失敗を記録 (maxAttempts に達すると自動ロック)
+        const failStatus = await lockout.recordFailure(email);
+        if (failStatus.isLocked) {
+            $response.status(423);
+            return { error: `試行回数の上限に達したため、アカウントをロックしました。` };
+        }
+        $response.status(401);
+        return { error: '認証情報が正しくありません', remainingAttempts: failStatus.remainingAttempts };
+    }
+
+    // 3. 認証成功時は失敗カウントをリセット
+    await lockout.reset(email);
+
+    // セッション発行等...
+    return { success: true };
+};
+```
+
+---
+
+### 12. `auth/corsFilter.js` (CORS 制御)
 RFC 4180 準拠の安全な CSV 文字列を生成します。
 
 ```javascript
@@ -384,7 +435,7 @@ const validatedData = result.data;
 ---
 
 ### 14. `http.js` (HTTP クライアント)
-タイムアウト制御、自動リトライ、クエリパラメータ自動付加、JSON 送受信に対応した軽量 HTTP クライアントです。
+タイムアウト制御、自動リトライ、クエリパラメータ自動付加、JSON 送受信、および **SSRF（Server-Side Request Forgery）防御** に対応した軽量 HTTP クライアントです。
 
 ```javascript
 const http = $loadLib('http.js');
@@ -396,8 +447,13 @@ const data = await http.getJson('https://api.example.com/search', {
     retry: 2
 });
 
-// POST JSON 送信
-const res = await http.postJson('https://api.example.com/items', { name: 'ItemA', price: 100 });
+// SSRF保護 (safe: true または ssrfProtection: true)
+// プライベートIP (10.x, 192.168.x, 172.16-31.x)、ループバック (127.x, localhost)、
+// クラウドメタデータ (169.254.169.254) 宛のリクエストを自動検知して ERR_SSRF_BLOCKED で遮断します
+const webhookResult = await http.postJson(userSuppliedWebhookUrl, payload, {
+    safe: true,
+    allowedHosts: ['api.partner.com', 'hooks.slack.com'] // 許可ホストのホワイトリスト指定も可能
+});
 ```
 
 ---

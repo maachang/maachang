@@ -664,6 +664,273 @@ describe('Security Protections Suite', () => {
             expect(validDelete.changes).toBe(1);
         });
     });
+
+    describe('13. SSRF (Server-Side Request Forgery) Prevention in modules/http.js', () => {
+        const http = require('../modules/http.js');
+
+        it('isPrivateIp がループバック、メタデータIP、プライベートIPを正しく検出すること', () => {
+            // IPv4 プライベート/ループバック/メタデータ
+            expect(http.isPrivateIp('127.0.0.1')).toBe(true);
+            expect(http.isPrivateIp('127.0.0.2')).toBe(true);
+            expect(http.isPrivateIp('169.254.169.254')).toBe(true); // AWS/GCP/Azure Metadata
+            expect(http.isPrivateIp('10.0.0.1')).toBe(true);
+            expect(http.isPrivateIp('172.16.0.1')).toBe(true);
+            expect(http.isPrivateIp('172.31.255.255')).toBe(true);
+            expect(http.isPrivateIp('192.168.1.100')).toBe(true);
+            expect(http.isPrivateIp('0.0.0.0')).toBe(true);
+            expect(http.isPrivateIp('100.64.0.1')).toBe(true); // CGNAT
+            expect(http.isPrivateIp('224.0.0.1')).toBe(true); // Multicast
+
+            // IPv6
+            expect(http.isPrivateIp('::1')).toBe(true);
+            expect(http.isPrivateIp('fe80::1')).toBe(true);
+            expect(http.isPrivateIp('::ffff:127.0.0.1')).toBe(true);
+
+            // パブリックIP
+            expect(http.isPrivateIp('8.8.8.8')).toBe(false);
+            expect(http.isPrivateIp('1.1.1.1')).toBe(false);
+            expect(http.isPrivateIp('172.32.0.1')).toBe(false);
+        });
+
+        it('validateUrlForSsrf がプライベートIP宛のURLをブロックすること', async () => {
+            const resLoopback = await http.validateUrlForSsrf('http://127.0.0.1:8080/secret');
+            expect(resLoopback.safe).toBe(false);
+            expect(resLoopback.reason).toContain('private/internal address');
+
+            const resMeta = await http.validateUrlForSsrf('http://169.254.169.254/latest/meta-data/');
+            expect(resMeta.safe).toBe(false);
+
+            const resLocalhost = await http.validateUrlForSsrf('http://localhost:3000/internal');
+            expect(resLocalhost.safe).toBe(false);
+            expect(resLocalhost.reason).toContain('resolved to private/internal IP');
+        });
+
+        it('validateUrlForSsrf が不当なプロトコル(file://, gopher://等)を拒絶すること', async () => {
+            const resFile = await http.validateUrlForSsrf('file:///etc/passwd');
+            expect(resFile.safe).toBe(false);
+            expect(resFile.reason).toContain('Forbidden protocol');
+        });
+
+        it('http.get で ssrfProtection: true または safe: true 時にプライベートIP宛のリクエストが遮断されること', async () => {
+            try {
+                await http.get('http://169.254.169.254/metadata', { safe: true });
+                expect(true).toBe(false); // 到達してはならない
+            } catch (err) {
+                expect(err.code).toBe('ERR_SSRF_BLOCKED');
+                expect(err.message).toContain('SSRF blocked');
+            }
+
+            try {
+                await http.postJson('http://localhost:8080/api', { data: 'test' }, { ssrfProtection: true });
+                expect(true).toBe(false); // 到達してはならない
+            } catch (err) {
+                expect(err.code).toBe('ERR_SSRF_BLOCKED');
+            }
+        });
+    });
+
+    describe('14. Credential Stuffing & Brute-Force Protection (modules/auth/lockout.js & Auto-ban)', () => {
+        const { createLockoutManager } = require('../modules/auth/lockout.js');
+
+        it('指定回数のログイン失敗でアカウントがロックされること', async () => {
+            const lockout = createLockoutManager({
+                maxAttempts: 3,
+                lockoutDurationMs: 60 * 1000,
+                windowMs: 60 * 1000
+            });
+
+            const userId = 'user_target@example.com';
+
+            // 1回目失敗
+            let res = await lockout.recordFailure(userId);
+            expect(res.isLocked).toBe(false);
+            expect(res.remainingAttempts).toBe(2);
+
+            // 2回目失敗
+            res = await lockout.recordFailure(userId);
+            expect(res.isLocked).toBe(false);
+            expect(res.remainingAttempts).toBe(1);
+
+            // 3回目失敗 (上限到達でロック)
+            res = await lockout.recordFailure(userId);
+            expect(res.isLocked).toBe(true);
+            expect(res.remainingAttempts).toBe(0);
+            expect(res.waitSeconds).toBeGreaterThan(0);
+
+            // check でもロック状態が反映されること
+            const check = await lockout.check(userId);
+            expect(check.isLocked).toBe(true);
+            expect(check.remainingAttempts).toBe(0);
+
+            // 成功時にリセットされること
+            await lockout.reset(userId);
+            const resetCheck = await lockout.check(userId);
+            expect(resetCheck.isLocked).toBe(false);
+            expect(resetCheck.remainingAttempts).toBe(3);
+        });
+
+        it('段階的バックオフ (exponential) が機能すること', async () => {
+            const lockout = createLockoutManager({
+                maxAttempts: 2,
+                lockoutDurationMs: 1000, // 1秒
+                exponential: true
+            });
+
+            const userId = 'victim_account';
+
+            // 1回目
+            await lockout.recordFailure(userId);
+            // 2回目 (ロック: 1秒)
+            let res2 = await lockout.recordFailure(userId);
+            expect(res2.isLocked).toBe(true);
+
+            // 3回目 (倍加: 2秒)
+            let res3 = await lockout.recordFailure(userId);
+            expect(res3.isLocked).toBe(true);
+            expect(res3.waitSeconds).toBeGreaterThanOrEqual(1);
+        });
+
+        it('ルーターの高度なレートリミット (banThreshold) で悪質IPが自動一時BANされること', async () => {
+            const banTestDir = path.resolve(__dirname, '../.tmp_ban_project');
+            fs.mkdirSync(path.join(banTestDir, 'conf'), { recursive: true });
+            fs.mkdirSync(path.join(banTestDir, 'public'), { recursive: true });
+            fs.writeFileSync(path.join(banTestDir, 'conf', 'server.json'), JSON.stringify({
+                rateLimit: {
+                    enabled: true,
+                    windowMs: 5000,
+                    max: 2,
+                    banThreshold: 2, // 2回超過 (合計4回目) で一時BAN
+                    banDurationMs: 30000,
+                    banMessage: "Attack detected. IP temporarily banned."
+                }
+            }));
+            fs.writeFileSync(path.join(banTestDir, 'public', 'api.html'), 'OK');
+
+            try {
+                const attackerIp = '203.0.113.199';
+                const makeReq = () => new Request('http://localhost:3000/api.html', {
+                    headers: { 'X-Real-IP': attackerIp }
+                });
+
+                // 1回目・2回目: 200 OK
+                expect((await handleRequest(makeReq(), { baseDir: banTestDir, frameworkDir, isDev: true })).status).toBe(200);
+                expect((await handleRequest(makeReq(), { baseDir: banTestDir, frameworkDir, isDev: true })).status).toBe(200);
+
+                // 3回目: 429 (通常レートリミット超過)
+                const res3 = await handleRequest(makeReq(), { baseDir: banTestDir, frameworkDir, isDev: true });
+                expect(res3.status).toBe(429);
+                const data3 = await res3.json();
+                expect(data3.error).toBe('Too Many Requests');
+
+                // 4回目: 429 (banThreshold到達により一時BAN発動)
+                const res4 = await handleRequest(makeReq(), { baseDir: banTestDir, frameworkDir, isDev: true });
+                expect(res4.status).toBe(429);
+                const data4 = await res4.json();
+                expect(data4.error).toContain('Attack detected');
+                expect(res4.headers.get('Retry-After')).toBeDefined();
+            } finally {
+                if (fs.existsSync(banTestDir)) {
+                    fs.rmSync(banTestDir, { recursive: true, force: true });
+                }
+            }
+        });
+    });
+
+    describe('15. Cryptography Hardening & Timing Attack Protection', () => {
+        const encrypt = require('../modules/encrypt.js');
+        const jwt = require('../modules/auth/jwt.js');
+
+        it('encrypt.timingSafeEqual が正しく定数時間比較を行うこと', () => {
+            expect(encrypt.timingSafeEqual('secret_api_token_123', 'secret_api_token_123')).toBe(true);
+            expect(encrypt.timingSafeEqual('secret_api_token_123', 'secret_api_token_124')).toBe(false);
+            expect(encrypt.timingSafeEqual('short', 'longer_string')).toBe(false);
+            expect(encrypt.timingSafeEqual('', '')).toBe(true);
+            expect(encrypt.timingSafeEqual(null, 'test')).toBe(false);
+            expect(encrypt.timingSafeEqual('test', undefined)).toBe(false);
+        });
+
+        it('jwt.revoke / isRevoked により特定トークンおよびJTIが即時無効化されること', () => {
+            const secret = 'super_secret_jwt_key_12345';
+            const payload = { userId: 'user999', jti: 'jti-uuid-777' };
+            const token = jwt.sign(payload, secret, { expiresIn: 3600 });
+
+            // 通常検証は成功
+            const verified = jwt.verify(token, secret);
+            expect(verified).not.toBeNull();
+            expect(verified.userId).toBe('user999');
+
+            // JTI を失効
+            jwt.revoke('jti-uuid-777', 60);
+            expect(jwt.isRevoked('jti-uuid-777')).toBe(true);
+
+            // 失効後は verify が失敗すること
+            const revokedVerify = jwt.verify(token, secret);
+            expect(revokedVerify).toBeNull();
+
+            // noError: false の場合は Revoked 例外
+            expect(() => {
+                jwt.verify(token, secret, { noError: false });
+            }).toThrow('revoked');
+        });
+
+        it('トークン文字列直接指定による失効も機能すること', () => {
+            const secret = 'super_secret_jwt_key_12345';
+            const payload = { userId: 'user888' };
+            const token = jwt.sign(payload, secret, { expiresIn: 3600 });
+
+            expect(jwt.verify(token, secret)).not.toBeNull();
+
+            jwt.revoke(token, 60);
+            expect(jwt.isRevoked(token)).toBe(true);
+            expect(jwt.verify(token, secret)).toBeNull();
+        });
+    });
+
+    describe('16. CSP Dynamic Nonce & Modern Isolation Headers', () => {
+        const cspDir = path.resolve(__dirname, '../.tmp_csp_project');
+
+        beforeAll(() => {
+            fs.mkdirSync(path.join(cspDir, 'conf'), { recursive: true });
+            fs.mkdirSync(path.join(cspDir, 'public'), { recursive: true });
+            fs.writeFileSync(path.join(cspDir, 'conf', 'server.json'), JSON.stringify({
+                csp: "default-src 'self'; script-src 'self' 'nonce-{nonce}'; object-src 'none';"
+            }));
+            fs.writeFileSync(path.join(cspDir, 'public', 'nonce-test.mt.js'), `
+                exports.handler = async function() {
+                    return {
+                        nonce: $request.nonce,
+                        html: '<script nonce="' + $request.nonce + '">console.log("secure");</script>'
+                    };
+                };
+            `);
+        });
+
+        afterAll(() => {
+            if (fs.existsSync(cspDir)) {
+                fs.rmSync(cspDir, { recursive: true, force: true });
+            }
+        });
+
+        it('リクエスト毎に動的 CSP nonce が発行されヘッダーと $request.nonce に反映されること', async () => {
+            const req = new Request('http://localhost:3000/nonce-test');
+            const res = await handleRequest(req, { baseDir: cspDir, frameworkDir, isDev: true });
+            expect(res.status).toBe(200);
+
+            const cspHeader = res.headers.get('Content-Security-Policy');
+            expect(cspHeader).toBeDefined();
+            expect(cspHeader).not.toContain('{nonce}');
+            expect(cspHeader).toContain("'nonce-");
+
+            // CORP ヘッダー (Cross-Origin-Resource-Policy) が付与されていること
+            expect(res.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
+
+            const data = await res.json();
+            expect(data.nonce).toBeDefined();
+            expect(data.nonce.length).toBeGreaterThan(10);
+            expect(cspHeader).toContain(data.nonce);
+            expect(data.html).toContain(data.nonce);
+        });
+    });
 });
 
 
