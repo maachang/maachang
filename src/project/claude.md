@@ -34,6 +34,12 @@
 - **独断での仕様決定禁止**: 実装を任された際、詳細仕様（データフィルタリング手法、抽出ロジック、制限値、除外基準など）を独断で決定・補完することは禁止。必ずユーザーの承認を得ること。
 - **車輪の再発明の禁止**: maachang が標準提供しているモジュール（`session.js`, `logger.js`, `validate.js` 等）や組み込みヘルパー（`$request`, `$response`, `$db` 等）を優先活用し、独自ライブラリを安易に自作しない。
 - **暗号・セキュリティ乱数の利用ルール（crypto.random 系の義務付け）**: セッションID、CSRFトークン、パスワードソルト、暗号鍵、認証・署名用トークンなどのセキュリティ・暗号化関連用途には、`Math.random()` や非暗号論的乱数生成器（PRNG）の利用を厳禁とする。必ず `crypto.randomBytes()`、`crypto.getRandomValues()`、`crypto.randomUUID()` などの標準 `crypto.random` 系暗号論的疑似乱数（CSPRNG）を使用すること。
+- **外部通信における SSRF（Server-Side Request Forgery）防御の義務付け**:
+  ユーザー入力や外部パラメータから受け取った URL / Webhook 等へ HTTP 通信を行う際は、必ず `$loadLib('http.js')` を用い、`{ safe: true }` または `{ ssrfProtection: true }` を有効化すること。内部ネットワーク（`10.x`, `172.16-31.x`, `192.168.x`）、ループバック（`127.x`, `localhost`）、クラウドメタデータ（`169.254.169.254`）宛の不正アクセスおよび DNS リバインディングを構造的に遮断すること。
+- **認証エンドポイントにおけるブルートフォース＆クレデンシャルスタッフィング対策の義務付け**:
+  ログイン、パスワードリセット、二要素認証等の認証エンドポイントを実装する際は、必ず `$loadLib('lockout.js')` を利用し、`lockout.check(identifier)` によるロック事前検証および `lockout.recordFailure(identifier)` による失敗回数カウント、`lockout.reset(identifier)` による成功時リセットを組み込むこと。同一アカウントに対する総当たりや漏洩リスト攻撃を自動検知して `423 Locked` を返却すること。
+- **APIキー・署名・認証トークン照合におけるタイミング攻撃対策の義務付け**:
+  APIキー、HMAC署名、カスタム認証トークン、暗号ハッシュ文字列を比較する際は、通常の `===` や `==` 演算子での文字列比較を禁止し、必ず `$loadLib('encrypt.js')` の `encrypt.timingSafeEqual(a, b)` を用いて定数時間比較（Constant-time comparison）を行うこと。
 - **ログイン機能・ユーザー別リソースにおける認可不備（BOLA/IDOR）対策の利用必須化**:
   ログイン機能やユーザー固有データを扱う Web 画面・API を実装する際は、リクエストパラメータ（ID等）の書き換えによる他者データの漏洩・改ざん（BOLA: Broken Object Level Authorization / IDOR: Insecure Direct Object Reference）を徹底排除すること。以下の実装パターンを**利用必須**とする:
   1. **リクエスト ID 盲信の禁止**: クライアントから渡された `userId` を信用せず、必ずセッション（`$loadLib('session.js')` または `rbac.getUser($request)`）から取得した本人情報を基準とする。
@@ -74,7 +80,7 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 
 | ヘルパー | 説明 | 主なメソッド / プロパティ |
 |---|---|---|
-| `$request` / `$request()` | リクエスト情報の取得 | `.path`, `.method`, `.query`, `.body`, `.cookies`, `.ip`, `.ips`, `.protocol`, `.isSecure`, `.host`, `.baseUrl`<br>`.getHeader(key)`, `.getQuery(key, def)`, `.getCookie(key, def)` |
+| `$request` / `$request()` | リクエスト情報の取得 | `.path`, `.method`, `.query`, `.body`, `.cookies`, `.ip`, `.ips`, `.protocol`, `.isSecure`, `.host`, `.baseUrl`, `.nonce`（動的CSP暗号乱数）<br>`.getHeader(key)`, `.getQuery(key, def)`, `.getCookie(key, def)` |
 | `$response` / `$response()` | レスポンスの生成・返却 | `.status(code)`, `.contentType(type, charset)`, `.header(key, val)`, `.setCookie(name, val, opt)`, `.deleteCookie(name)`<br>`.json(data, status)`, `.html(str, status)`, `.text(str, status)`, `.download(pathOrBuffer, filename, opts)`, `.file(filePath, opts)`, `.redirect(url, status)`, `.body(val)` |
 | `$include(path, params)` | 別テンプレート/HTMLのインクルード | `${$include("./parts/header.mt.html", { title: "..." })}`<br>（`${$include(...)}` は自動で await 補完） |
 | `$params` | インクルードパラメータの参照 | テンプレートやパーツ内で `${$params.title}` や `${$params.user}` としてアクセス |
@@ -131,10 +137,12 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`d.toString(mode, format)` / `d.toFormatString(pattern)`**: 日時フォーマット出力（`{yyyy}/{MM}/{dd}({dj}) {hh}:{mm}:{ss}` 等）。
 - **`DateEx.between(date, mode).isBetween(target)`**: 月始・月末などの期間取得および範囲内外判定。
 
-### 4. `password.js` / `jwt.js` / `csrf.js` / `rbac.js` / `corsFilter.js`（セキュリティ・認証・認可）
+### 4. `password.js` / `jwt.js` / `csrf.js` / `rbac.js` / `lockout.js` / `corsFilter.js`（セキュリティ・認証・認可）
 - **`password.hash(pwd)` / `password.verify(pwd, hashed)`**: PBKDF2-HMAC-SHA256 による安全なパスワードハッシュ化・照合。
 - **`jwt.sign(payload, secret, opt)` / `jwt.verify(token, secret)`**: HS256 による JWT トークン署名・検証。
+- **`jwt.revoke(tokenOrJti, expiresInSec)` / `jwt.isRevoked(tokenOrJti)`**: ログアウト・不正アクセス検知時の JWT 即時トークン失効（Revocation / Blacklist）。
 - **`csrf.generateToken(sid?)` / `csrf.verify(sid?, token?)` / `csrf.verify(req)`**: セッション連携 CSRF トークン生成・検証。
+- **`lockout.check(id, scope)` / `lockout.recordFailure(id, scope)` / `lockout.reset(id, scope)`**: アカウント単位の連続ログイン失敗による一時ロック＆クレデンシャルスタッフィング防御（段階的バックオフ・SQLite永続化/インメモリ対応）。
 - **`rbac.hasRole(user, role)` / `rbac.can(user, permission)` / `rbac.create(config)`**: ロールベース認可（階層継承 `inherits` およびワイルドカード `*` 認可）。
 - **`rbac.isOwner(user, resource)` / `rbac.ensureOwner(resource, opt)`**: リソース所有権の検証＆不一致時403自動返却（BOLA/IDOR対策）。
 - **`corsFilter.apply(options)`**: `filter.mt.js` 等で利用する CORS 制御ヘルパー（許可オリジン判定、OPTIONS プリフライト対応、資格情報ヘッダー付与）。
@@ -201,7 +209,8 @@ maachang の `*.mt.js` / `*.mt.html` (JHTML) / `filter.mt.js` 内では以下の
 - **`format.money(val)` / `format.parseMoney(str)` / `format.toHalfWidth(str)` / `format.bytes(n)` / `format.mask(str)` / `format.truncate(str, len)`**: 日本語業務画面向けフォーマット（金額相互変換・全角半角等）。
 - **`encrypt.encrypt(plain, key)` / `encrypt.decrypt(cipher, key)`**: AES-256-GCM 可逆暗号化・復号（改ざん検知 AuthTag 付き）。
 - **`encrypt.randomToken(len)` / `encrypt.sha256(str)` / `encrypt.hmac(str, key)`**: ランダムトークン・ハッシュ生成。
-- **`http.get(url, opt)` / `http.postJson(url, data, opt)` / `http.getJson(url, opt)`**: タイムアウト・リトライ付き HTTP クライアント。
+- **`encrypt.timingSafeEqual(a, b)`**: APIキー・署名・認証トークン照合用の定数時間文字列比較（タイミング攻撃防止）。
+- **`http.get(url, opt)` / `http.postJson(url, data, opt)` / `http.getJson(url, opt)`**: タイムアウト・リトライ付き HTTP クライアント。`{ safe: true }` または `{ ssrfProtection: true }` 指定により、プライベートIP/クラウドメタデータ/DNSリバインディングを自動遮断する **SSRF 防御** をサポート。
 
 ### 9. `fileUtil.js` / `file.js`（ファイル・JSON入出力支援）
 - **`fileUtil.readJson(path, def)` / `fileUtil.writeJson(path, data)`**: JSON の安全な読み書き（親ディレクトリ自動生成）。
