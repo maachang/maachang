@@ -108,7 +108,7 @@ function parseArgs(args) {
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
         if (arg === '-v' || arg === '--version') {
-            console.log(`maachang v${getVersion()}`);
+            console.log(`msrv v${getVersion()}`);
             process.exit(0);
         } else if (arg === '--help') {
             showHelp();
@@ -187,7 +187,7 @@ function startServer(customOptions = {}) {
         : 10 * 1024 * 1024; // デフォルト 10MB
 
     console.log('====================================================');
-    console.log(' 🚀 maachang server (Bun.serve on-premise framework)');
+    console.log(' 🚀 msrv server (Bun.serve on-premise framework)');
     console.log('====================================================');
     console.log(` - Project Dir   : ${baseDir}`);
     console.log(` - Framework Dir : ${frameworkDir}`);

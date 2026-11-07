@@ -195,7 +195,7 @@ exports.handler = async function() {
         // 1. maachang -v & --help
         const mcVer = Bun.spawnSync(['bun', path.join(frameworkDir, 'src', 'index.js'), '-v']);
         expect(mcVer.exitCode).toBe(0);
-        expect(mcVer.stdout.toString()).toContain('maachang v1.0.0');
+        expect(mcVer.stdout.toString()).toContain('msrv v1.0.0');
 
         const mcHelp = Bun.spawnSync(['bun', path.join(frameworkDir, 'src', 'index.js'), '--help']);
         expect(mcHelp.exitCode).toBe(0);
