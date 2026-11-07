@@ -262,7 +262,7 @@ async function stopServer(server, options = {}) {
         }
     }
 
-    logger.info('✅ maachang server stopped cleanly.');
+    logger.info('✅ msrv server stopped cleanly.');
 }
 
 /**
