@@ -71,10 +71,10 @@ function getVersion() {
  */
 function showHelp() {
     console.log(`
-maachang - オンプレミス向け Bun 超最小 Web アプリケーションサーバー
+msrv - オンプレミス向け Bun 超最小 Web アプリケーションサーバー
 
 使用方法:
-  maachang [オプション]
+  msrv [オプション]
 
 オプション:
   -p, --port <port>       リスニングポート番号を指定 (デフォルト: 3000, conf/server.json 優先)
@@ -85,10 +85,10 @@ maachang - オンプレミス向け Bun 超最小 Web アプリケーション�
   --help                  このヘルプメッセージを表示
 
 使用例:
-  maachang
-  maachang -p 8080
-  maachang --prod
-  maachang -d /var/www/my-app -p 3000
+  msrv
+  msrv -p 8080
+  msrv --prod
+  msrv -d /var/www/my-app -p 3000
 `);
 }
 
