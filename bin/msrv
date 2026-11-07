@@ -1,0 +1,8 @@
+#!/bin/sh
+# maachang サーバー起動用 CLI スクリプト (minto 踏襲)
+# カレントディレクトリをプロジェクトルートとして Bun.serve を起動します。
+
+MAACHANG_HOME="${MAACHANG_HOME:-$(cd "$(dirname "$0")/.." && pwd)}"
+export MAACHANG_HOME
+
+exec bun "${MAACHANG_HOME}/src/index.js" "$@"
