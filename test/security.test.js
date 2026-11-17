@@ -790,6 +790,45 @@ describe('Security Protections Suite', () => {
             expect(res3.waitSeconds).toBeGreaterThanOrEqual(1);
         });
 
+        it('SQLite 保存モード (dbPath) で、失敗の記録・ロック・解除ができ、別のインスタンス（再起動相当）にも残ること', async () => {
+            const dbFile = path.join(require('node:os').tmpdir(), `lockout-${process.pid}-${Date.now()}.db`);
+            const opts = { maxAttempts: 3, lockoutDurationMs: 60 * 1000, windowMs: 60 * 1000, dbPath: dbFile };
+            try {
+                const a = createLockoutManager(opts);
+                const id = 'sqlite_user@example.com';
+                expect((await a.check(id)).isLocked).toBe(false);
+                let res = await a.recordFailure(id);
+                expect(res.isLocked).toBe(false);
+                expect(res.attempts).toBe(1);
+                res = await a.recordFailure(id);
+                expect(res.attempts).toBe(2);
+                res = await a.recordFailure(id);
+                expect(res.isLocked).toBe(true);
+                expect(res.waitSeconds).toBeGreaterThan(0);
+
+                // 別のインスタンス（再起動した状態）でも、ロックが残っている
+                const b = createLockoutManager(opts);
+                const check = await b.check(id);
+                expect(check.isLocked).toBe(true);
+                expect(check.remainingAttempts).toBe(0);
+
+                // 別のキー・別のスコープには、影響しない
+                expect((await b.check('other@example.com')).isLocked).toBe(false);
+                expect((await b.check(id, 'ip')).isLocked).toBe(false);
+
+                // リセットで、解除される
+                expect(await b.reset(id)).toBe(true);
+                const after = await createLockoutManager(opts).check(id);
+                expect(after.isLocked).toBe(false);
+                expect(after.remainingAttempts).toBe(3);
+
+                // 期限切れの掃除が、エラーにならない
+                await b.cleanExpired();
+            } finally {
+                for (const f of [dbFile, dbFile + '-wal', dbFile + '-shm']) { try { fs.unlinkSync(f); } catch (_) {} }
+            }
+        });
+
         it('ルーターの高度なレートリミット (banThreshold) で悪質IPが自動一時BANされること', async () => {
             const banTestDir = path.resolve(__dirname, '../.tmp_ban_project');
             fs.mkdirSync(path.join(banTestDir, 'conf'), { recursive: true });

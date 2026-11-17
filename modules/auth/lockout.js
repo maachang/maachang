@@ -22,6 +22,21 @@ const _inMemoryAttempts = new Map();
 let _sqliteDb = null;
 let _isTableInitialized = false;
 
+// ---- SQLite 保存の読み書き（src/db.js が公開している get / run だけを使う）----
+function sqlFind(key, dbPath) {
+    return dbWrapper.get('SELECT * FROM auth_lockout WHERE key = ?', [key], dbPath) ?? null;
+}
+function sqlSave(rec, dbPath) {
+    dbWrapper.run(
+        'INSERT OR REPLACE INTO auth_lockout (key, scope, attempts, first_failed_at, last_failed_at, locked_until) VALUES (?, ?, ?, ?, ?, ?)',
+        [rec.key, rec.scope, rec.attempts, rec.first_failed_at, rec.last_failed_at, rec.locked_until],
+        dbPath
+    );
+}
+function sqlDelete(key, dbPath) {
+    dbWrapper.run('DELETE FROM auth_lockout WHERE key = ?', [key], dbPath);
+}
+
 /**
  * 試行管理テーブルの初期化 (SQLite使用時)
  * @param {string} dbPath 
@@ -92,7 +107,7 @@ class LockoutManager {
 
         let record = null;
         if (this.dbPath && _isTableInitialized) {
-            record = dbWrapper.findById('auth_lockout', key, { primaryKey: 'key', dbPath: this.dbPath });
+            record = sqlFind(key, this.dbPath);
         } else {
             record = _inMemoryAttempts.get(key);
         }
@@ -149,7 +164,7 @@ class LockoutManager {
 
         let record = null;
         if (this.dbPath && _isTableInitialized) {
-            record = dbWrapper.findById('auth_lockout', key, { primaryKey: 'key', dbPath: this.dbPath });
+            record = sqlFind(key, this.dbPath);
         } else {
             record = _inMemoryAttempts.get(key);
         }
@@ -184,11 +199,7 @@ class LockoutManager {
         };
 
         if (this.dbPath && _isTableInitialized) {
-            if (record) {
-                dbWrapper.updateById('auth_lockout', key, newRecord, { primaryKey: 'key', dbPath: this.dbPath });
-            } else {
-                dbWrapper.insert('auth_lockout', newRecord, this.dbPath);
-            }
+            sqlSave(newRecord, this.dbPath);   // 新規も更新も、同じ（INSERT OR REPLACE）
         } else {
             _inMemoryAttempts.set(key, newRecord);
         }
@@ -215,7 +226,7 @@ class LockoutManager {
         const key = this._normalizeKey(identifier, scope);
         if (this.dbPath && _isTableInitialized) {
             try {
-                dbWrapper.deleteById('auth_lockout', key, { primaryKey: 'key', dbPath: this.dbPath });
+                sqlDelete(key, this.dbPath);
                 return true;
             } catch (_) {
                 return false;
